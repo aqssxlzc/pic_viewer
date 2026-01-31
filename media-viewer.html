@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>媒体文件查看器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            z-index: 100;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: #1d4ed8;
+            transform: translateY(-1px);
+        }
+
+        .stats {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .grid-container {
+            margin-top: 140px;
+            padding: 20px;
+            min-height: calc(100vh - 140px);
+        }
+
+        .media-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            will-change: transform;
+        }
+
+        .media-item {
+            position: relative;
+            aspect-ratio: 1;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #2a2a2a;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            will-change: transform;
+        }
+
+        .media-item:hover {
+            transform: scale(1.05) translateZ(0);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+        }
+
+        .media-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+        }
+
+        .media-item video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+        }
+
+        .media-item .play-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .media-item .play-icon::after {
+            content: '';
+            width: 0;
+            height: 0;
+            border-left: 20px solid white;
+            border-top: 12px solid transparent;
+            border-bottom: 12px solid transparent;
+            margin-left: 4px;
+        }
+
+        .media-item .file-name {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 10px;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Modal for image preview */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            position: relative;
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .modal.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-content img {
+            max-width: 100%;
+            max-height: 90vh;
+            object-fit: contain;
+            border-radius: 8px;
+            transform: translateZ(0);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+            z-index: 1001;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+            z-index: 1001;
+        }
+
+        .modal-nav:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .modal-nav.prev {
+            left: 20px;
+        }
+
+        .modal-nav.next {
+            right: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #333;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #2a2a2a 25%, #333 50%, #2a2a2a 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* 硬件加速优化 */
+        .media-item,
+        .modal-content,
+        .media-item img,
+        .media-item video {
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            perspective: 1000px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📸 媒体文件查看器</h1>
+        <div class="controls">
+            <div class="file-input-wrapper">
+                <label for="folderInput" class="btn">选择文件夹</label>
+                <input type="file" id="folderInput" webkitdirectory directory multiple>
+            </div>
+            <div class="stats">
+                <span id="statsText">未加载文件</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-container">
+        <div class="media-grid" id="mediaGrid"></div>
+        <div class="loading" id="loading" style="display: none;">
+            <div class="loading-spinner"></div>
+            <p>加载中...</p>
+        </div>
+    </div>
+
+    <div class="modal" id="modal">
+        <button class="modal-close" id="modalClose">&times;</button>
+        <button class="modal-nav prev" id="modalPrev">&lt;</button>
+        <button class="modal-nav next" id="modalNext">&gt;</button>
+        <div class="modal-content">
+            <img id="modalImage" src="" alt="">
+        </div>
+    </div>
+
+    <script>
+        class MediaViewer {
+            constructor() {
+                this.allFiles = [];
+                this.imageFiles = [];
+                this.videoFiles = [];
+                this.loadedItems = new Set();
+                this.currentImageIndex = -1;
+                this.batchSize = 20;
+                this.currentBatch = 0;
+                this.isLoading = false;
+                
+                this.supportedImageFormats = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+                this.supportedVideoFormats = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'];
+                
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                this.setupIntersectionObserver();
+                this.setupScrollListener();
+            }
+
+            setupEventListeners() {
+                document.getElementById('folderInput').addEventListener('change', (e) => {
+                    this.handleFileSelect(e);
+                });
+
+                document.getElementById('modalClose').addEventListener('click', () => {
+                    this.closeModal();
+                });
+
+                document.getElementById('modalPrev').addEventListener('click', () => {
+                    this.navigateImage(-1);
+                });
+
+                document.getElementById('modalNext').addEventListener('click', () => {
+                    this.navigateImage(1);
+                });
+
+                document.getElementById('modal').addEventListener('click', (e) => {
+                    if (e.target.id === 'modal') {
+                        this.closeModal();
+                    }
+                });
+
+                document.addEventListener('keydown', (e) => {
+                    if (document.getElementById('modal').classList.contains('active')) {
+                        if (e.key === 'Escape') this.closeModal();
+                        if (e.key === 'ArrowLeft') this.navigateImage(-1);
+                        if (e.key === 'ArrowRight') this.navigateImage(1);
+                    }
+                });
+            }
+
+            setupIntersectionObserver() {
+                this.observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            this.loadMediaItem(entry.target);
+                        }
+                    });
+                }, {
+                    rootMargin: '100px',
+                    threshold: 0.01
+                });
+            }
+
+            setupScrollListener() {
+                let scrollTimeout;
+                window.addEventListener('scroll', () => {
+                    clearTimeout(scrollTimeout);
+                    scrollTimeout = setTimeout(() => {
+                        this.checkLoadMore();
+                    }, 150);
+                });
+            }
+
+            handleFileSelect(e) {
+                const files = Array.from(e.target.files);
+                this.allFiles = [];
+                this.imageFiles = [];
+                this.videoFiles = [];
+                this.loadedItems.clear();
+                this.currentBatch = 0;
+                
+                files.forEach(file => {
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (this.supportedImageFormats.includes(ext)) {
+                        this.imageFiles.push(file);
+                        this.allFiles.push({ file, type: 'image' });
+                    } else if (this.supportedVideoFormats.includes(ext)) {
+                        this.videoFiles.push(file);
+                        this.allFiles.push({ file, type: 'video' });
+                    }
+                });
+
+                this.updateStats();
+                this.renderInitialBatch();
+            }
+
+            updateStats() {
+                const total = this.allFiles.length;
+                const images = this.imageFiles.length;
+                const videos = this.videoFiles.length;
+                document.getElementById('statsText').textContent = 
+                    `共 ${total} 个文件 | ${images} 张图片 | ${videos} 个视频`;
+            }
+
+            renderInitialBatch() {
+                const grid = document.getElementById('mediaGrid');
+                grid.innerHTML = '';
+                this.currentBatch = 0;
+                this.loadMoreItems();
+            }
+
+            loadMoreItems() {
+                if (this.isLoading) return;
+                
+                this.isLoading = true;
+                const start = this.currentBatch * this.batchSize;
+                const end = Math.min(start + this.batchSize, this.allFiles.length);
+                
+                if (start >= this.allFiles.length) {
+                    this.isLoading = false;
+                    return;
+                }
+
+                const grid = document.getElementById('mediaGrid');
+                
+                for (let i = start; i < end; i++) {
+                    const item = this.allFiles[i];
+                    const element = this.createMediaElement(item, i);
+                    grid.appendChild(element);
+                    this.observer.observe(element);
+                }
+
+                this.currentBatch++;
+                this.isLoading = false;
+            }
+
+            createMediaElement(item, index) {
+                const div = document.createElement('div');
+                div.className = 'media-item skeleton';
+                div.dataset.index = index;
+                div.dataset.type = item.type;
+                div.dataset.loaded = 'false';
+
+                const fileName = document.createElement('div');
+                fileName.className = 'file-name';
+                fileName.textContent = item.file.name;
+                div.appendChild(fileName);
+
+                if (item.type === 'image') {
+                    div.addEventListener('click', () => {
+                        this.openModal(index);
+                    });
+                } else if (item.type === 'video') {
+                    const playIcon = document.createElement('div');
+                    playIcon.className = 'play-icon';
+                    div.appendChild(playIcon);
+                }
+
+                return div;
+            }
+
+            loadMediaItem(element) {
+                if (element.dataset.loaded === 'true') return;
+                
+                const index = parseInt(element.dataset.index);
+                const item = this.allFiles[index];
+                const url = URL.createObjectURL(item.file);
+
+                if (item.type === 'image') {
+                    const img = document.createElement('img');
+                    img.src = url;
+                    img.onload = () => {
+                        element.classList.remove('skeleton');
+                        element.dataset.loaded = 'true';
+                    };
+                    element.insertBefore(img, element.firstChild);
+                } else if (item.type === 'video') {
+                    const video = document.createElement('video');
+                    video.src = url;
+                    video.muted = true;
+                    video.loop = true;
+                    video.autoplay = true;
+                    video.playsInline = true;
+                    video.onloadeddata = () => {
+                        element.classList.remove('skeleton');
+                        element.dataset.loaded = 'true';
+                    };
+                    element.insertBefore(video, element.firstChild);
+                }
+
+                this.loadedItems.add(index);
+            }
+
+            checkLoadMore() {
+                const scrollPosition = window.innerHeight + window.scrollY;
+                const threshold = document.documentElement.scrollHeight - 500;
+                
+                if (scrollPosition >= threshold && !this.isLoading) {
+                    this.loadMoreItems();
+                }
+            }
+
+            openModal(index) {
+                const item = this.allFiles[index];
+                if (item.type !== 'image') return;
+
+                this.currentImageIndex = this.imageFiles.findIndex(
+                    imgFile => imgFile.name === item.file.name
+                );
+
+                const modal = document.getElementById('modal');
+                const modalImage = document.getElementById('modalImage');
+                
+                modalImage.src = URL.createObjectURL(item.file);
+                modal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+
+            closeModal() {
+                const modal = document.getElementById('modal');
+                modal.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+
+            navigateImage(direction) {
+                this.currentImageIndex += direction;
+                
+                if (this.currentImageIndex < 0) {
+                    this.currentImageIndex = this.imageFiles.length - 1;
+                } else if (this.currentImageIndex >= this.imageFiles.length) {
+                    this.currentImageIndex = 0;
+                }
+
+                const file = this.imageFiles[this.currentImageIndex];
+                const modalImage = document.getElementById('modalImage');
+                modalImage.src = URL.createObjectURL(file);
+            }
+        }
+
+        // Initialize the viewer
+        const viewer = new MediaViewer();
+    </script>
+</body>
+</html>

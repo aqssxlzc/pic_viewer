@@ -1,0 +1,88 @@
+# Qt/C++项目构建产物
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CMakeLists.txt.user
+*.qmake.stash
+
+# 可执行文件
+MediaViewer
+
+# Qt生成的中间文件
+moc_*
+*.moc
+ui_*
+qrc_*
+*.o
+*.obj
+*.exe
+*.app
+*.dll
+*.so
+*.so.*
+
+# Qt Creator文件
+*.user
+*.user.*
+
+# IDE目录
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 编译输出目录
+release/
+debug/
+*.pdb
+*.idb
+*.ilk
+
+# 依赖目录
+3rdparty/
+deps/
+
+# 本地配置文件
+.localconfig
+.env
+
+# 日志文件
+*.log
+
+# 备份文件
+*.bak
+*.backup
+
+# 临时文件
+*.tmp
+temp/
+
+# 媒体文件（忽略测试媒体文件）
+*.jpeg
+*.jpg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.svg
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.json
+# 如果需要保留某些媒体文件，可以添加例外规则
+# !sample_image.jpeg
+# !sample_video.mp4
