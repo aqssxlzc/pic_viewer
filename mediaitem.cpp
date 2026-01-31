@@ -6,6 +6,7 @@
 #include <QMediaContent>
 #include <QPainterPath>
 #include <QTimer>
+#include <QtConcurrent>
 
 MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
     : QWidget(parent)
@@ -18,6 +19,7 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
     , loaded(false)
     , currentScale(1.0)
     , isActive(false)
+    , videoLoaded(false)
 {
     QString ext = fileInfo.suffix().toLower();
     QStringList imageExts;
@@ -41,7 +43,7 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
 
     if (isImageFile) {
         thumbnailLabel = new QLabel(this);
-        thumbnailLabel->setScaledContents(true);
+        thumbnailLabel->setScaledContents(false);
         thumbnailLabel->setAlignment(Qt::AlignCenter);
         thumbnailLabel->setStyleSheet("background-color: transparent;");
         layout->addWidget(thumbnailLabel);
@@ -81,6 +83,25 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
     scaleAnimation = new QPropertyAnimation(this, "");
     scaleAnimation->setDuration(200);
     scaleAnimation->setEasingCurve(QEasingCurve::OutCubic);
+
+    imageWatcher = new QFutureWatcher<QImage>(this);
+    imageLoading = false;
+    connect(imageWatcher, &QFutureWatcher<QImage>::finished, this, [this]() {
+        imageLoading = false;
+        if (!isActive || !thumbnailLabel) {
+            return;
+        }
+        QImage image = imageWatcher->result();
+        if (!image.isNull()) {
+            originalPixmap = QPixmap::fromImage(image);
+            thumbnailLabel->setPixmap(originalPixmap.scaled(
+                thumbnailLabel->size(),
+                Qt::KeepAspectRatio,
+                Qt::SmoothTransformation
+            ));
+            loaded = true;
+        }
+    });
 }
 
 MediaItem::~MediaItem()
@@ -99,6 +120,29 @@ void MediaItem::setupVideoPlayer()
     mediaPlayer = new QMediaPlayer(this, QMediaPlayer::VideoSurface);
     mediaPlayer->setVideoOutput(videoWidget);
     mediaPlayer->setMuted(true);
+
+    // Loop video
+    connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::EndOfMedia) {
+            mediaPlayer->setPosition(0);
+            mediaPlayer->play();
+        }
+    });
+
+    // Handle codec errors gracefully
+    connect(mediaPlayer, static_cast<void(QMediaPlayer::*)(QMediaPlayer::Error)>(&QMediaPlayer::error),
+            this, [this](QMediaPlayer::Error) {
+        if (playIconLabel) {
+            playIconLabel->setStyleSheet(
+                "background-color: rgba(200, 0, 0, 0.7);"
+                "color: white;"
+                "border-radius: 30px;"
+                "font-size: 20px;"
+                "padding: 15px 20px;"
+            );
+            playIconLabel->setText("✗");
+        }
+    });
 }
 
 void MediaItem::showEvent(QShowEvent *event)
@@ -106,65 +150,35 @@ void MediaItem::showEvent(QShowEvent *event)
     QWidget::showEvent(event);
     if (!loaded) {
         loadMedia();
-        loaded = true;
     }
 }
 
 void MediaItem::loadMedia()
 {
     if (isImageFile) {
-        QImageReader reader(fileInfo.absoluteFilePath());
-        reader.setAutoTransform(true);
-        
-        // Scale down large images for thumbnail
-        QSize imageSize = reader.size();
-        if (imageSize.width() > 500 || imageSize.height() > 500) {
-            imageSize.scale(500, 500, Qt::KeepAspectRatio);
-            reader.setScaledSize(imageSize);
+        if (!isActive || imageLoading || loaded) {
+            return;
         }
-        
-        QImage image = reader.read();
-        if (!image.isNull()) {
-            originalPixmap = QPixmap::fromImage(image);
-            thumbnailLabel->setPixmap(originalPixmap.scaled(
-                thumbnailLabel->size(),
-                Qt::KeepAspectRatio,
-                Qt::SmoothTransformation
-            ));
-        }
+        imageLoading = true;
+        const QString path = fileInfo.absoluteFilePath();
+        imageWatcher->setFuture(QtConcurrent::run([path]() -> QImage {
+            QImageReader reader(path);
+            reader.setAutoTransform(true);
+            QSize imageSize = reader.size();
+            if (imageSize.width() > 500 || imageSize.height() > 500) {
+                imageSize.scale(500, 500, Qt::KeepAspectRatio);
+                reader.setScaledSize(imageSize);
+            }
+            return reader.read();
+        }));
     } else if (isVideoFile && mediaPlayer) {
-        QUrl videoUrl = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
-        mediaPlayer->setMedia(QMediaContent(videoUrl));
-        
-        // Handle video errors
-        connect(mediaPlayer, static_cast<void(QMediaPlayer::*)(QMediaPlayer::Error)>(&QMediaPlayer::error),
-                [this](QMediaPlayer::Error error) {
-            Q_UNUSED(error);
-            // Silently handle codec errors - video will show play icon but won't play
-            if (playIconLabel) {
-                playIconLabel->setStyleSheet(
-                    "background-color: rgba(200, 0, 0, 0.7);"
-                    "color: white;"
-                    "border-radius: 30px;"
-                    "font-size: 20px;"
-                    "padding: 15px 20px;"
-                );
-                playIconLabel->setText("✗");
-            }
-        });
-        
-        // Loop video
-        connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, [this](QMediaPlayer::MediaStatus status) {
-            if (status == QMediaPlayer::EndOfMedia) {
-                mediaPlayer->setPosition(0);
-                mediaPlayer->play();
-            }
-        });
-        
+        if (!videoLoaded) {
+            QUrl videoUrl = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
+            mediaPlayer->setMedia(QMediaContent(videoUrl));
+            videoLoaded = true;
+        }
         if (isActive) {
             mediaPlayer->play();
-        } else {
-            mediaPlayer->pause();
         }
     }
 }
@@ -177,13 +191,24 @@ void MediaItem::setActive(bool active)
     isActive = active;
 
     if (!isVideoFile || !mediaPlayer) {
+        if (isImageFile && isActive && !loaded && !imageLoading) {
+            loadMedia();
+        }
         return;
     }
 
     if (isActive) {
+        if (!videoLoaded) {
+            loadMedia();
+        }
         QTimer::singleShot(0, mediaPlayer, &QMediaPlayer::play);
     } else {
-        QTimer::singleShot(0, mediaPlayer, &QMediaPlayer::pause);
+        // Stop and unload to free decoder resources
+        QTimer::singleShot(0, mediaPlayer, &QMediaPlayer::stop);
+        QTimer::singleShot(0, this, [this]() {
+            mediaPlayer->setMedia(QMediaContent());
+            videoLoaded = false;
+        });
     }
 }
 

@@ -11,7 +11,7 @@ set(CMAKE_AUTOUIC ON)
 # Optimization flags
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets Concurrent)
 
 add_executable(MediaViewer
     main.cpp
@@ -31,6 +31,7 @@ target_link_libraries(MediaViewer PRIVATE
     Qt6::MultimediaWidgets
     Qt6::OpenGL
     Qt6::OpenGLWidgets
+    Qt6::Concurrent
 )
 
 # Install target

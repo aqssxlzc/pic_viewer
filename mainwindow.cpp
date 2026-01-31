@@ -17,6 +17,8 @@ MainWindow::MainWindow(QWidget *parent)
     , batchSize(30)
     , imageCount(0)
     , videoCount(0)
+    , sortAscending(false)
+    , lastScrollPosition(0)
 {
     imageExtensions << "jpg" << "jpeg" << "png" << "gif" << "bmp" << "webp" << "svg";
     videoExtensions << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm";
@@ -31,8 +33,13 @@ MainWindow::MainWindow(QWidget *parent)
     // Restore last opened directory
     QSettings settings("MediaViewer", "MediaViewer");
     lastDirectory = settings.value("lastDirectory", "").toString();
+    sortAscending = settings.value("sortAscending", false).toBool();
+    lastScrollPosition = settings.value("scrollPosition", 0).toInt();
+    
+    qDebug() << "Restored settings - Directory:" << lastDirectory << "ScrollPos:" << lastScrollPosition << "SortAsc:" << sortAscending;
+    
     if (!lastDirectory.isEmpty()) {
-        loadMediaFiles(lastDirectory);
+        loadMediaFiles(lastDirectory, true);  // restoreScroll = true
     }
 }
 
@@ -78,10 +85,27 @@ void MainWindow::setupUI()
     );
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openFolder);
     
+    QPushButton *sortButton = new QPushButton("排序: 新到旧");
+    sortButton->setStyleSheet(
+        "QPushButton {"
+        "    background-color: #6b7280;"
+        "    color: white;"
+        "    border: none;"
+        "    padding: 10px 20px;"
+        "    border-radius: 6px;"
+        "    font-size: 14px;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #4b5563;"
+        "}"
+    );
+    connect(sortButton, &QPushButton::clicked, this, &MainWindow::toggleSortOrder);
+    
     statsLabel = new QLabel("未加载文件");
     statsLabel->setStyleSheet("color: #999; font-size: 14px;");
     
     controlsLayout->addWidget(openButton);
+    controlsLayout->addWidget(sortButton);
     controlsLayout->addWidget(statsLabel);
     controlsLayout->addStretch();
     
@@ -121,6 +145,9 @@ void MainWindow::setupUI()
 
 void MainWindow::openFolder()
 {
+    // Save current scroll position
+    lastScrollPosition = scrollArea->verticalScrollBar()->value();
+    
     QString directory = QFileDialog::getExistingDirectory(
         this,
         "选择包含媒体文件的文件夹",
@@ -130,18 +157,25 @@ void MainWindow::openFolder()
 
     if (!directory.isEmpty()) {
         lastDirectory = directory;
-        loadMediaFiles(directory);
+        loadMediaFiles(directory, false);  // Don't restore scroll for new folder
     }
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    int currentScroll = scrollArea->verticalScrollBar()->value();
     QSettings settings("MediaViewer", "MediaViewer");
     settings.setValue("lastDirectory", lastDirectory);
+    settings.setValue("sortAscending", sortAscending);
+    settings.setValue("scrollPosition", currentScroll);
+    settings.sync();  // Force write to disk
+    qDebug() << "Saving settings - Directory:" << lastDirectory 
+             << "ScrollPos:" << currentScroll 
+             << "SortAsc:" << sortAscending;
     QMainWindow::closeEvent(event);
 }
 
-void MainWindow::loadMediaFiles(const QString &directory)
+void MainWindow::loadMediaFiles(const QString &directory, bool restoreScroll)
 {
     mediaGrid->clear();
     allFiles.clear();
@@ -163,13 +197,29 @@ void MainWindow::loadMediaFiles(const QString &directory)
         }
     }
     
-    // Sort by modified time in descending order (newest first)
-    std::sort(allFiles.begin(), allFiles.end(), [](const QFileInfo &a, const QFileInfo &b) {
-        return a.lastModified() > b.lastModified();
+    // Sort by modified time based on sortAscending flag
+    std::sort(allFiles.begin(), allFiles.end(), [this](const QFileInfo &a, const QFileInfo &b) {
+        if (sortAscending) {
+            return a.lastModified() < b.lastModified();
+        } else {
+            return a.lastModified() > b.lastModified();
+        }
     });
 
     updateStats();
     loadNextBatch();
+    
+    // Restore scroll position if requested
+    if (restoreScroll && lastScrollPosition > 0) {
+        qDebug() << "Restoring scroll position:" << lastScrollPosition;
+        // Use multiple timers to ensure layout is complete
+        QTimer::singleShot(150, this, [this]() {
+            int maxScroll = scrollArea->verticalScrollBar()->maximum();
+            int targetPos = qMin(lastScrollPosition, maxScroll);
+            scrollArea->verticalScrollBar()->setValue(targetPos);
+            qDebug() << "Scroll restored to:" << targetPos << "max:" << maxScroll;
+        });
+    }
 }
 
 void MainWindow::loadNextBatch()
@@ -219,6 +269,16 @@ void MainWindow::checkLoadMore()
     if (maxScroll - scrollPos < 500 && currentBatch * batchSize < allFiles.size()) {
         loadNextBatch();
     }
+}
+
+void MainWindow::toggleSortOrder()
+{
+    sortAscending = !sortAscending;
+    // Save current scroll position, then re-sort and reload
+    lastScrollPosition = scrollArea->verticalScrollBar()->value();
+    loadMediaFiles(lastDirectory, false);  // Don't restore scroll for sort toggle
+    // Reset scroll to top when sort changes
+    scrollArea->verticalScrollBar()->setValue(0);
 }
 
 // MediaGrid implementation
@@ -302,7 +362,7 @@ void MediaGrid::relayout()
 void MediaGrid::updateVisibleItems(const QRect &visibleRect)
 {
     for (QWidget *widget : items) {
-        MediaItem *item = qobject_cast<MediaItem*>(widget);
+        MediaItem *item = static_cast<MediaItem*>(widget);
         if (!item) {
             continue;
         }

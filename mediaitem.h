@@ -9,6 +9,8 @@
 #include <QVideoWidget>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QFutureWatcher>
+#include <QImage>
 
 class MediaItem : public QWidget
 {
@@ -43,6 +45,9 @@ private:
     QMediaPlayer *mediaPlayer;
     QVideoWidget *videoWidget;
     QPropertyAnimation *scaleAnimation;
+    QFutureWatcher<QImage> *imageWatcher;
+    bool imageLoading;
+    bool videoLoaded;
     
     bool loaded;
     bool isImageFile;

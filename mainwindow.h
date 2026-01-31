@@ -27,13 +27,14 @@ private slots:
     void openFolder();
     void onScrollChanged(int value);
     void checkLoadMore();
+    void toggleSortOrder();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
     void setupUI();
-    void loadMediaFiles(const QString &directory);
+    void loadMediaFiles(const QString &directory, bool restoreScroll = false);
     void loadNextBatch();
     void updateStats();
 
@@ -52,6 +53,8 @@ private:
     int imageCount;
     int videoCount;
     QString lastDirectory;
+    bool sortAscending;
+    int lastScrollPosition;
 };
 
 class MediaGrid : public QWidget
