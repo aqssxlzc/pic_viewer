@@ -12,6 +12,9 @@
 #include <QList>
 #include <QFileInfo>
 #include <QSharedPointer>
+#include <QTreeWidget>
+#include <QSplitter>
+#include <QLineEdit>
 #include "imageviewer.h"
 #include "zipreader.h"
 
@@ -35,22 +38,40 @@ private slots:
     void onScrollChanged(int value);
     void checkLoadMore();
     void toggleSortOrder();
+    void onTreeItemDoubleClicked(QTreeWidgetItem *item, int column);
+    void onPathEditReturnPressed();
+    void goBack();
+    void goUp();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
     void setupUI();
+    void setupMenuBar();
+    void setupFileTree();
+    void setupMediaArea();
+    void populateTree(const QString &path);
     void loadMediaFiles(const QString &directory, bool restoreScroll = false);
     void loadZipFile(const QString &zipPath);
     void loadNextBatch();
     void updateStats();
     void clearCurrentView();
+    void updateNavigationButtons(const QString &path);
+    void addToHistory(const QString &path);
+    bool isZipFile(const QString &path) const;
+
+    // 主布局组件
+    QSplitter *mainSplitter;
+    QWidget *leftPanel;
+    QTreeWidget *fileTree;
+    QLineEdit *pathEdit;
+    QPushButton *backButton;
+    QPushButton *upButton;
 
     QScrollArea *scrollArea;
     MediaGrid *mediaGrid;
-    QPushButton *openButton;
-    QPushButton *openZipButton;
+    QPushButton *sortButton;
     QLabel *statsLabel;
     QTimer *loadTimer;
 
@@ -62,7 +83,9 @@ private:
     int batchSize;
     int imageCount;
     int videoCount;
-    QString lastDirectory;
+    QString currentPath;
+    QStringList navigationHistory;
+    int historyIndex;
     bool sortAscending;
     int lastScrollPosition;
 
@@ -79,6 +102,7 @@ public:
     MediaGrid(QWidget *parent = nullptr);
     void addMediaItem(const QFileInfo &fileInfo);
     void addZipMediaItem(const ZipReader::ZipEntry &entry, QSharedPointer<ZipReader> zipReader);
+    void addZipFileItem(const QString &zipPath);
     void setZipEntries(const QList<ZipReader::ZipEntry> &entries) { zipEntries = entries; }
     void setZipReader(QSharedPointer<ZipReader> reader) { zipReader = reader; }
     void clear();
@@ -88,6 +112,7 @@ public:
 signals:
     void imageClicked(const QString &filePath, const QStringList &imagePaths);
     void zipMediaClicked(const QString &filePath, const QList<ZipReader::ZipEntry> &entries, QSharedPointer<ZipReader> zipReader);
+    void zipFileClicked(const QString &zipPath);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
