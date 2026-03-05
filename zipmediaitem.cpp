@@ -1,40 +1,31 @@
-#include "mediaitem.h"
+#include "zipmediaitem.h"
 #include <QVBoxLayout>
-#include <QImageReader>
 #include <QPainter>
 #include <QGraphicsDropShadowEffect>
 #include <QPainterPath>
 #include <QTimer>
 #include <QtConcurrent>
-#include <QUrl>
 
-MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
+ZipMediaItem::ZipMediaItem(const ZipReader::ZipEntry &entry,
+                           QSharedPointer<ZipReader> zipReader,
+                           QWidget *parent)
     : QWidget(parent)
-    , fileInfo(fileInfo)
+    , m_entry(entry)
+    , m_zipReader(zipReader)
     , thumbnailLabel(nullptr)
     , fileNameLabel(nullptr)
     , playIconLabel(nullptr)
-    , mediaPlayer(nullptr)
-    , audioOutput(nullptr)
-    , videoWidget(nullptr)
     , loaded(false)
     , currentScale(1.0)
     , isActive(false)
-    , videoLoaded(false)
+    , imageLoading(false)
 {
-    QString ext = fileInfo.suffix().toLower();
-    QStringList imageExts;
-    imageExts << "jpg" << "jpeg" << "png" << "gif" << "bmp" << "webp";
-    QStringList videoExts;
-    videoExts << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm";
-
-    isImageFile = imageExts.contains(ext);
-    isVideoFile = videoExts.contains(ext);
+    isImageFile = ZipReader::isImageFile(entry.fileName);
+    isVideoFile = ZipReader::isVideoFile(entry.fileName);
 
     setStyleSheet("background-color: #2a2a2a; border-radius: 12px;");
     setCursor(Qt::PointingHandCursor);
 
-    // Enable hardware acceleration
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground);
 
@@ -49,8 +40,10 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
         thumbnailLabel->setStyleSheet("background-color: transparent;");
         layout->addWidget(thumbnailLabel);
     } else if (isVideoFile) {
-        setupVideoPlayer();
-        layout->addWidget(videoWidget);
+        QLabel *placeholder = new QLabel(this);
+        placeholder->setStyleSheet("background-color: #1a1a1a;");
+        placeholder->setAlignment(Qt::AlignCenter);
+        layout->addWidget(placeholder);
 
         playIconLabel = new QLabel("▶", this);
         playIconLabel->setStyleSheet(
@@ -65,7 +58,7 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
         playIconLabel->move(width()/2 - 30, height()/2 - 30);
     }
 
-    fileNameLabel = new QLabel(fileInfo.fileName(), this);
+    fileNameLabel = new QLabel(entry.fileName, this);
     fileNameLabel->setStyleSheet(
         "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
         "stop:0 transparent, stop:1 rgba(0, 0, 0, 200));"
@@ -80,13 +73,11 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
     effect->setOpacity(0.9);
     fileNameLabel->setGraphicsEffect(effect);
 
-    // Setup hover animation
     scaleAnimation = new QPropertyAnimation(this, "");
     scaleAnimation->setDuration(200);
     scaleAnimation->setEasingCurve(QEasingCurve::OutCubic);
 
     imageWatcher = new QFutureWatcher<QImage>(this);
-    imageLoading = false;
     connect(imageWatcher, &QFutureWatcher<QImage>::finished, this, [this]() {
         imageLoading = false;
         if (!isActive || !thumbnailLabel) {
@@ -105,122 +96,64 @@ MediaItem::MediaItem(const QFileInfo &fileInfo, QWidget *parent)
     });
 }
 
-MediaItem::~MediaItem()
+ZipMediaItem::~ZipMediaItem()
 {
-    if (mediaPlayer) {
-        mediaPlayer->stop();
-        delete mediaPlayer;
-    }
 }
 
-void MediaItem::setupVideoPlayer()
-{
-    videoWidget = new QVideoWidget(this);
-    videoWidget->setStyleSheet("background-color: #2a2a2a;");
-
-    mediaPlayer = new QMediaPlayer(this);
-    audioOutput = new QAudioOutput(this);
-    audioOutput->setMuted(true);
-    mediaPlayer->setVideoOutput(videoWidget);
-    mediaPlayer->setAudioOutput(audioOutput);
-
-    // Loop video
-    connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
-        if (status == QMediaPlayer::EndOfMedia) {
-            mediaPlayer->setPosition(0);
-            mediaPlayer->play();
-        }
-    });
-
-    // Handle codec errors gracefully
-    connect(mediaPlayer, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &) {
-        if (playIconLabel) {
-            playIconLabel->setStyleSheet(
-                "background-color: rgba(200, 0, 0, 0.7);"
-                "color: white;"
-                "border-radius: 30px;"
-                "font-size: 20px;"
-                "padding: 15px 20px;"
-            );
-            playIconLabel->setText("✗");
-        }
-    });
-}
-
-void MediaItem::showEvent(QShowEvent *event)
+void ZipMediaItem::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    if (!loaded) {
+    if (!loaded && isImageFile) {
         loadMedia();
     }
 }
 
-void MediaItem::loadMedia()
+void ZipMediaItem::loadMedia()
 {
-    if (isImageFile) {
-        if (!isActive || imageLoading || loaded) {
-            return;
-        }
-        imageLoading = true;
-        const QString path = fileInfo.absoluteFilePath();
-        imageWatcher->setFuture(QtConcurrent::run([path]() -> QImage {
-            QImageReader reader(path);
-            reader.setAutoTransform(true);
-            QSize imageSize = reader.size();
-            if (imageSize.width() > 500 || imageSize.height() > 500) {
-                imageSize.scale(500, 500, Qt::KeepAspectRatio);
-                reader.setScaledSize(imageSize);
-            }
-            return reader.read();
-        }));
-    } else if (isVideoFile && mediaPlayer) {
-        if (!videoLoaded) {
-            QUrl videoUrl = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
-            mediaPlayer->setSource(videoUrl);
-            videoLoaded = true;
-        }
-        if (isActive) {
-            mediaPlayer->play();
-        }
+    if (!isImageFile || !isActive || imageLoading || loaded || !m_zipReader) {
+        return;
     }
+
+    imageLoading = true;
+    QString filePath = m_entry.filePath;
+    QSharedPointer<ZipReader> zipReader = m_zipReader;
+
+    imageWatcher->setFuture(QtConcurrent::run([filePath, zipReader]() -> QImage {
+        QString errorString;
+        QByteArray data = zipReader->readFile(filePath, &errorString);
+        if (data.isEmpty()) {
+            return QImage();
+        }
+
+        QImage image;
+        if (image.loadFromData(data)) {
+            // 缩放以节省内存
+            if (image.width() > 500 || image.height() > 500) {
+                image = image.scaled(500, 500, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+        }
+        return image;
+    }));
 }
 
-void MediaItem::setActive(bool active)
+void ZipMediaItem::setActive(bool active)
 {
     if (isActive == active) {
         return;
     }
     isActive = active;
 
-    if (!isVideoFile || !mediaPlayer) {
-        if (isImageFile && isActive && !loaded && !imageLoading) {
-            loadMedia();
-        }
-        return;
-    }
-
-    if (isActive) {
-        if (!videoLoaded) {
-            loadMedia();
-        }
-        QTimer::singleShot(0, mediaPlayer, &QMediaPlayer::play);
-    } else {
-        // Stop and unload to free decoder resources
-        QTimer::singleShot(0, mediaPlayer, &QMediaPlayer::stop);
-        QTimer::singleShot(0, this, [this]() {
-            mediaPlayer->setSource(QUrl());
-            videoLoaded = false;
-        });
+    if (isImageFile && isActive && !loaded && !imageLoading) {
+        loadMedia();
     }
 }
 
-void MediaItem::enterEvent(QEnterEvent *event)
+void ZipMediaItem::enterEvent(QEnterEvent *event)
 {
     Q_UNUSED(event);
     currentScale = 1.05;
     update();
 
-    // Add shadow effect
     QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(this);
     shadow->setBlurRadius(20);
     shadow->setXOffset(0);
@@ -229,7 +162,7 @@ void MediaItem::enterEvent(QEnterEvent *event)
     setGraphicsEffect(shadow);
 }
 
-void MediaItem::leaveEvent(QEvent *event)
+void ZipMediaItem::leaveEvent(QEvent *event)
 {
     Q_UNUSED(event);
     currentScale = 1.0;
@@ -237,14 +170,13 @@ void MediaItem::leaveEvent(QEvent *event)
     setGraphicsEffect(nullptr);
 }
 
-void MediaItem::mousePressEvent(QMouseEvent *event)
+void ZipMediaItem::mousePressEvent(QMouseEvent *event)
 {
     Q_UNUSED(event);
-    // Emit clicked for both images and videos
     emit clicked();
 }
 
-void MediaItem::paintEvent(QPaintEvent *event)
+void ZipMediaItem::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
 
@@ -252,21 +184,19 @@ void MediaItem::paintEvent(QPaintEvent *event)
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // Apply scale transform
     if (currentScale != 1.0) {
         painter.translate(width() / 2.0, height() / 2.0);
         painter.scale(currentScale, currentScale);
         painter.translate(-width() / 2.0, -height() / 2.0);
     }
 
-    // Draw rounded rectangle background
     QPainterPath path;
     path.addRoundedRect(rect(), 12, 12);
     painter.setClipPath(path);
     painter.fillRect(rect(), QColor("#2a2a2a"));
 }
 
-void MediaItem::resizeEvent(QResizeEvent *event)
+void ZipMediaItem::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
 

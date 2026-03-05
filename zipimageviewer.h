@@ -1,5 +1,5 @@
-#ifndef IMAGEVIEWER_H
-#define IMAGEVIEWER_H
+#ifndef ZIPIMAGEVIEWER_H
+#define ZIPIMAGEVIEWER_H
 
 #include <QDialog>
 #include <QLabel>
@@ -15,14 +15,23 @@
 #include <QStackedWidget>
 #include <QMutex>
 #include <QTimer>
+#include <QBuffer>
+#include "zipreader.h"
 
-class ImageViewer : public QDialog
+/**
+ * ZIP 压缩包内媒体文件的查看器
+ * 支持图片和视频浏览，支持左右键切换
+ */
+class ZipImageViewer : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit ImageViewer(const QString &filePath, const QStringList &allPaths, QWidget *parent = nullptr);
-    ~ImageViewer();
+    explicit ZipImageViewer(const QString &filePath,
+                           const QList<ZipReader::ZipEntry> &entries,
+                           QSharedPointer<ZipReader> zipReader,
+                           QWidget *parent = nullptr);
+    ~ZipImageViewer();
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -37,16 +46,15 @@ private:
     void loadMedia();
     void setupUI();
     void updateImage();
-    void updateVideo();
-    bool isVideoFile(const QString &filePath) const;
+    bool isVideoFile(const QString &fileName) const;
     void displayImage(int index);
     void displayVideo(int index);
 
-    // 预加载相关
+    // 预加载
     void preloadAdjacent();
     void startPreload(int index, const QSize &targetSize);
 
-    // 双缓冲相关
+    // 双缓冲
     QLabel* getAvailableLabel();
     void switchToLabel(QLabel *label);
 
@@ -61,15 +69,18 @@ private:
     QPushButton *nextButton;
     QPushButton *closeButton;
     QPushButton *playPauseButton;
+    QLabel *infoLabel;
 
-    QStringList mediaPaths;
+    QList<ZipReader::ZipEntry> mediaEntries;
+    QSharedPointer<ZipReader> zipReader;
     int currentIndex;
     QPixmap currentPixmap;
     bool isVideo;
 
-    // 视频延迟播放
-    QString pendingVideoPath;
+    // 视频播放
+    QByteArray pendingVideoData;
     QTimer *videoPlayTimer;
+    QBuffer *videoBuffer;
 
     // 预加载缓存
     static const int PRELOAD_RANGE = 3;
@@ -78,4 +89,4 @@ private:
     QMutex cacheMutex;
 };
 
-#endif // IMAGEVIEWER_H
+#endif // ZIPIMAGEVIEWER_H

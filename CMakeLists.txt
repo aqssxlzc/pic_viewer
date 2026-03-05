@@ -13,6 +13,10 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets Concurrent)
 
+# Find libzip
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBZIP REQUIRED libzip)
+
 add_executable(MediaViewer
     main.cpp
     mainwindow.cpp
@@ -21,6 +25,16 @@ add_executable(MediaViewer
     mediaitem.h
     imageviewer.cpp
     imageviewer.h
+    zipreader.cpp
+    zipreader.h
+    zipmediaitem.cpp
+    zipmediaitem.h
+    zipimageviewer.cpp
+    zipimageviewer.h
+)
+
+target_include_directories(MediaViewer PRIVATE
+    ${LIBZIP_INCLUDE_DIRS}
 )
 
 target_link_libraries(MediaViewer PRIVATE
@@ -32,6 +46,7 @@ target_link_libraries(MediaViewer PRIVATE
     Qt6::OpenGL
     Qt6::OpenGLWidgets
     Qt6::Concurrent
+    ${LIBZIP_LIBRARIES}
 )
 
 # Install target

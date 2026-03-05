@@ -1,4 +1,4 @@
-#include "imageviewer.h"
+#include "zipimageviewer.h"
 #include <QVBoxLayout>
 #include <QImageReader>
 #include <QScreen>
@@ -7,17 +7,32 @@
 #include <QPropertyAnimation>
 #include <QFileInfo>
 #include <QtConcurrent>
+#include <QBuffer>
 #include <QUrl>
+#include <QDebug>
 
-ImageViewer::ImageViewer(const QString &filePath, const QStringList &allPaths, QWidget *parent)
+ZipImageViewer::ZipImageViewer(const QString &filePath,
+                               const QList<ZipReader::ZipEntry> &entries,
+                               QSharedPointer<ZipReader> zipReader,
+                               QWidget *parent)
     : QDialog(parent)
-    , mediaPaths(allPaths)
-    , currentIndex(allPaths.indexOf(filePath))
+    , mediaEntries(entries)
+    , zipReader(zipReader)
+    , currentIndex(0)
     , isVideo(false)
     , currentLabelIndex(0)
     , videoPlayTimer(nullptr)
+    , videoBuffer(nullptr)
     , audioOutput(nullptr)
 {
+    // 找到当前文件在列表中的索引
+    for (int i = 0; i < entries.size(); ++i) {
+        if (entries[i].filePath == filePath) {
+            currentIndex = i;
+            break;
+        }
+    }
+
     setupUI();
     loadMedia();
 
@@ -25,9 +40,9 @@ ImageViewer::ImageViewer(const QString &filePath, const QStringList &allPaths, Q
     setModal(true);
 }
 
-ImageViewer::~ImageViewer()
+ZipImageViewer::~ZipImageViewer()
 {
-    // 取消所有异步加载任务
+    // 取消预加载
     for (auto watcher : preloadWatchers) {
         if (watcher) {
             watcher->cancel();
@@ -45,9 +60,14 @@ ImageViewer::~ImageViewer()
         videoPlayTimer->stop();
         delete videoPlayTimer;
     }
+
+    if (videoBuffer) {
+        videoBuffer->close();
+        delete videoBuffer;
+    }
 }
 
-void ImageViewer::setupUI()
+void ZipImageViewer::setupUI()
 {
     setStyleSheet("background-color: rgba(0, 0, 0, 240);");
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
@@ -55,11 +75,10 @@ void ImageViewer::setupUI()
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    // 使用 QStackedWidget 实现双缓冲，避免黑屏
+    // 双缓冲
     imageStack = new QStackedWidget(this);
     mainLayout->addWidget(imageStack);
 
-    // 创建多个 QLabel 用于双缓冲
     for (int i = 0; i < 3; ++i) {
         QLabel *label = new QLabel(imageStack);
         label->setAlignment(Qt::AlignCenter);
@@ -70,24 +89,33 @@ void ImageViewer::setupUI()
     }
     imageStack->setCurrentIndex(0);
 
-    // Video widget
+    // 视频播放器
     videoWidget = new QVideoWidget(this);
     videoWidget->setStyleSheet("background-color: black;");
     videoWidget->hide();
     mainLayout->addWidget(videoWidget);
 
-    // Media player - 只创建一个实例
     mediaPlayer = new QMediaPlayer(this);
     audioOutput = new QAudioOutput(this);
     mediaPlayer->setVideoOutput(videoWidget);
     mediaPlayer->setAudioOutput(audioOutput);
 
-    // 视频延迟播放定时器
     videoPlayTimer = new QTimer(this);
     videoPlayTimer->setSingleShot(true);
-    connect(videoPlayTimer, &QTimer::timeout, this, &ImageViewer::playPendingVideo);
+    connect(videoPlayTimer, &QTimer::timeout, this, &ZipImageViewer::playPendingVideo);
 
-    // Close button
+    // 信息标签
+    infoLabel = new QLabel(this);
+    infoLabel->setStyleSheet(
+        "background-color: rgba(0, 0, 0, 150);"
+        "color: white;"
+        "padding: 8px 15px;"
+        "border-radius: 5px;"
+        "font-size: 14px;"
+    );
+    infoLabel->hide();
+
+    // 关闭按钮
     closeButton = new QPushButton("✕", this);
     closeButton->setFixedSize(50, 50);
     closeButton->setStyleSheet(
@@ -105,7 +133,7 @@ void ImageViewer::setupUI()
     closeButton->move(width() - 70, 20);
     connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
 
-    // Previous button
+    // 上一张
     prevButton = new QPushButton("‹", this);
     prevButton->setFixedSize(60, 60);
     prevButton->setStyleSheet(
@@ -121,9 +149,9 @@ void ImageViewer::setupUI()
         "}"
     );
     prevButton->move(20, height() / 2 - 30);
-    connect(prevButton, &QPushButton::clicked, this, &ImageViewer::showPrevious);
+    connect(prevButton, &QPushButton::clicked, this, &ZipImageViewer::showPrevious);
 
-    // Next button
+    // 下一张
     nextButton = new QPushButton("›", this);
     nextButton->setFixedSize(60, 60);
     nextButton->setStyleSheet(
@@ -139,9 +167,9 @@ void ImageViewer::setupUI()
         "}"
     );
     nextButton->move(width() - 80, height() / 2 - 30);
-    connect(nextButton, &QPushButton::clicked, this, &ImageViewer::showNext);
+    connect(nextButton, &QPushButton::clicked, this, &ZipImageViewer::showNext);
 
-    // Play/Pause button for videos
+    // 播放/暂停按钮
     playPauseButton = new QPushButton("⏸", this);
     playPauseButton->setFixedSize(60, 60);
     playPauseButton->setStyleSheet(
@@ -168,7 +196,7 @@ void ImageViewer::setupUI()
         }
     });
 
-    // Add fade-in animation
+    // 淡入动画
     QGraphicsOpacityEffect *effect = new QGraphicsOpacityEffect(this);
     setGraphicsEffect(effect);
 
@@ -180,24 +208,21 @@ void ImageViewer::setupUI()
     animation->start(QPropertyAnimation::DeleteWhenStopped);
 }
 
-void ImageViewer::loadMedia()
+void ZipImageViewer::loadMedia()
 {
-    if (currentIndex < 0 || currentIndex >= mediaPaths.size()) {
+    if (currentIndex < 0 || currentIndex >= mediaEntries.size()) {
         return;
     }
 
-    QString filePath = mediaPaths[currentIndex];
+    ZipReader::ZipEntry entry = mediaEntries[currentIndex];
     bool wasVideo = isVideo;
-    isVideo = isVideoFile(filePath);
+    isVideo = isVideoFile(entry.fileName);
 
-    // 停止任何待播放的视频
     videoPlayTimer->stop();
-    pendingVideoPath.clear();
+    pendingVideoData.clear();
 
-    // 先停止视频播放并清理资源
     if (wasVideo || isVideo) {
         mediaPlayer->stop();
-        // 清除当前媒体源，释放 GStreamer 资源
         mediaPlayer->setSource(QUrl());
     }
 
@@ -205,24 +230,34 @@ void ImageViewer::loadMedia()
         displayVideo(currentIndex);
     } else {
         displayImage(currentIndex);
-        // 预加载相邻图片
         preloadAdjacent();
     }
 
     QString fileType = isVideo ? "视频" : "图片";
-    setWindowTitle(QString("%1查看器 - %2/%3").arg(fileType).arg(currentIndex + 1).arg(mediaPaths.size()));
+    QString zipName = QFileInfo(zipReader->zipPath()).fileName();
+    setWindowTitle(QString("%1查看器 - %2 [%3/%4]")
+                   .arg(fileType).arg(zipName)
+                   .arg(currentIndex + 1).arg(mediaEntries.size()));
+
+    // 更新信息标签
+    infoLabel->setText(QString("%1/%2 - %3")
+                       .arg(currentIndex + 1)
+                       .arg(mediaEntries.size())
+                       .arg(entry.fileName));
+    infoLabel->adjustSize();
+    infoLabel->move(20, 20);
+    infoLabel->show();
 }
 
-void ImageViewer::displayImage(int index)
+void ZipImageViewer::displayImage(int index)
 {
-    // Show image stack, hide video widget
     videoWidget->hide();
     playPauseButton->hide();
     imageStack->show();
 
-    QString filePath = mediaPaths[index];
+    ZipReader::ZipEntry entry = mediaEntries[index];
 
-    // 检查缓存中是否有预加载的图片
+    // 检查缓存
     {
         QMutexLocker locker(&cacheMutex);
         if (pixmapCache.contains(index)) {
@@ -235,44 +270,58 @@ void ImageViewer::displayImage(int index)
         }
     }
 
-    // 同步加载当前图片
-    QImageReader reader(filePath);
-    reader.setAutoTransform(true);
-    QImage image = reader.read();
-    if (!image.isNull()) {
+    // 同步加载
+    QString errorString;
+    QByteArray data = zipReader->readFile(entry.filePath, &errorString);
+    if (data.isEmpty()) {
+        qWarning() << "无法读取文件:" << entry.filePath << errorString;
+        return;
+    }
+
+    QImage image;
+    if (image.loadFromData(data)) {
         currentPixmap = QPixmap::fromImage(image);
         updateImage();
     }
 }
 
-void ImageViewer::displayVideo(int index)
+void ZipImageViewer::displayVideo(int index)
 {
-    QString filePath = mediaPaths[index];
+    ZipReader::ZipEntry entry = mediaEntries[index];
 
-    // Show video widget, hide image stack
     imageStack->hide();
     videoWidget->show();
     playPauseButton->show();
     playPauseButton->setText("⏸");
 
-    // 使用延迟加载避免 GStreamer 资源竞争
-    pendingVideoPath = filePath;
-    videoPlayTimer->start(100);  // 100ms 延迟
-}
-
-void ImageViewer::playPendingVideo()
-{
-    if (pendingVideoPath.isEmpty()) {
+    // 读取视频数据到内存
+    QString errorString;
+    pendingVideoData = zipReader->readFile(entry.filePath, &errorString);
+    if (pendingVideoData.isEmpty()) {
+        qWarning() << "无法读取视频:" << entry.filePath << errorString;
         return;
     }
 
-    QString filePath = pendingVideoPath;
-    pendingVideoPath.clear();
+    videoPlayTimer->start(100);
+}
 
-    // 设置新的媒体源
-    mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
+void ZipImageViewer::playPendingVideo()
+{
+    if (pendingVideoData.isEmpty()) {
+        return;
+    }
 
-    // Loop video
+    // 清理旧的 buffer
+    if (videoBuffer) {
+        videoBuffer->close();
+        delete videoBuffer;
+    }
+
+    videoBuffer = new QBuffer(&pendingVideoData);
+    videoBuffer->open(QIODevice::ReadOnly);
+
+    mediaPlayer->setSourceDevice(videoBuffer, QUrl());
+
     disconnect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, nullptr, nullptr);
     connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
         if (status == QMediaPlayer::EndOfMedia) {
@@ -284,22 +333,12 @@ void ImageViewer::playPendingVideo()
     mediaPlayer->play();
 }
 
-bool ImageViewer::isVideoFile(const QString &filePath) const
+bool ZipImageViewer::isVideoFile(const QString &fileName) const
 {
-    QStringList videoExts;
-    videoExts << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm";
-
-    QFileInfo fileInfo(filePath);
-    QString ext = fileInfo.suffix().toLower();
-    return videoExts.contains(ext);
+    return ZipReader::isVideoFile(fileName);
 }
 
-void ImageViewer::updateVideo()
-{
-    // Video size is handled automatically by QVideoWidget
-}
-
-void ImageViewer::updateImage()
+void ZipImageViewer::updateImage()
 {
     if (currentPixmap.isNull()) {
         return;
@@ -307,7 +346,6 @@ void ImageViewer::updateImage()
 
     QSize screenSize = size();
 
-    // Scale image to fit screen while maintaining aspect ratio
     QPixmap scaledPixmap = currentPixmap.scaled(
         screenSize * 0.9,
         Qt::KeepAspectRatio,
@@ -319,14 +357,13 @@ void ImageViewer::updateImage()
     switchToLabel(label);
 }
 
-QLabel* ImageViewer::getAvailableLabel()
+QLabel* ZipImageViewer::getAvailableLabel()
 {
-    // 获取下一个可用的标签（不是当前显示的）
     int nextIndex = (currentLabelIndex + 1) % imageLabels.size();
     return imageLabels[nextIndex];
 }
 
-void ImageViewer::switchToLabel(QLabel *label)
+void ZipImageViewer::switchToLabel(QLabel *label)
 {
     int index = imageLabels.indexOf(label);
     if (index >= 0) {
@@ -335,35 +372,35 @@ void ImageViewer::switchToLabel(QLabel *label)
     }
 }
 
-void ImageViewer::showPrevious()
+void ZipImageViewer::showPrevious()
 {
-    if (mediaPaths.isEmpty()) {
+    if (mediaEntries.isEmpty()) {
         return;
     }
 
     currentIndex--;
     if (currentIndex < 0) {
-        currentIndex = mediaPaths.size() - 1;
+        currentIndex = mediaEntries.size() - 1;
     }
 
     loadMedia();
 }
 
-void ImageViewer::showNext()
+void ZipImageViewer::showNext()
 {
-    if (mediaPaths.isEmpty()) {
+    if (mediaEntries.isEmpty()) {
         return;
     }
 
     currentIndex++;
-    if (currentIndex >= mediaPaths.size()) {
+    if (currentIndex >= mediaEntries.size()) {
         currentIndex = 0;
     }
 
     loadMedia();
 }
 
-void ImageViewer::keyPressEvent(QKeyEvent *event)
+void ZipImageViewer::keyPressEvent(QKeyEvent *event)
 {
     switch (event->key()) {
         case Qt::Key_Escape:
@@ -387,7 +424,7 @@ void ImageViewer::keyPressEvent(QKeyEvent *event)
             loadMedia();
             break;
         case Qt::Key_End:
-            currentIndex = mediaPaths.size() - 1;
+            currentIndex = mediaEntries.size() - 1;
             loadMedia();
             break;
         case Qt::Key_PageUp:
@@ -395,7 +432,7 @@ void ImageViewer::keyPressEvent(QKeyEvent *event)
             loadMedia();
             break;
         case Qt::Key_PageDown:
-            currentIndex = qMin(mediaPaths.size() - 1, currentIndex + 10);
+            currentIndex = qMin(mediaEntries.size() - 1, currentIndex + 10);
             loadMedia();
             break;
         case Qt::Key_Space:
@@ -414,20 +451,16 @@ void ImageViewer::keyPressEvent(QKeyEvent *event)
     }
 }
 
-void ImageViewer::resizeEvent(QResizeEvent *event)
+void ZipImageViewer::resizeEvent(QResizeEvent *event)
 {
     QDialog::resizeEvent(event);
 
-    // Reposition buttons
     closeButton->move(width() - 70, 20);
     prevButton->move(20, height() / 2 - 30);
     nextButton->move(width() - 80, height() / 2 - 30);
     playPauseButton->move(width() / 2 - 30, height() - 100);
 
-    // Update media size
-    if (isVideo) {
-        updateVideo();
-    } else if (!currentPixmap.isNull()) {
+    if (!isVideo && !currentPixmap.isNull()) {
         QPixmap scaledPixmap = currentPixmap.scaled(
             size() * 0.9,
             Qt::KeepAspectRatio,
@@ -437,18 +470,17 @@ void ImageViewer::resizeEvent(QResizeEvent *event)
         currentLabel->setPixmap(scaledPixmap);
     }
 
-    // 清除缓存，窗口大小变了需要重新缩放
     QMutexLocker locker(&cacheMutex);
     pixmapCache.clear();
 }
 
 // ==================== 预加载相关方法 ====================
 
-void ImageViewer::preloadAdjacent()
+void ZipImageViewer::preloadAdjacent()
 {
     QSize targetSize = size() * 0.9;
 
-    // 取消之前未完成的预加载
+    // 取消未完成的预加载
     for (auto it = preloadWatchers.begin(); it != preloadWatchers.end(); ) {
         if (it.value() && !it.value()->isFinished()) {
             it.value()->cancel();
@@ -461,15 +493,15 @@ void ImageViewer::preloadAdjacent()
         }
     }
 
-    // 预加载前后的图片文件
+    // 预加载相邻图片
     for (int offset = -PRELOAD_RANGE; offset <= PRELOAD_RANGE; offset++) {
         if (offset == 0) continue;
 
         int preloadIndex = currentIndex + offset;
-        if (preloadIndex < 0 || preloadIndex >= mediaPaths.size()) continue;
+        if (preloadIndex < 0 || preloadIndex >= mediaEntries.size()) continue;
 
-        QString filePath = mediaPaths[preloadIndex];
-        if (!isVideoFile(filePath)) {
+        QString fileName = mediaEntries[preloadIndex].fileName;
+        if (!isVideoFile(fileName)) {
             QMutexLocker locker(&cacheMutex);
             if (pixmapCache.contains(preloadIndex)) {
                 continue;
@@ -479,11 +511,12 @@ void ImageViewer::preloadAdjacent()
     }
 }
 
-void ImageViewer::startPreload(int index, const QSize &targetSize)
+void ZipImageViewer::startPreload(int index, const QSize &targetSize)
 {
-    if (index < 0 || index >= mediaPaths.size()) return;
+    if (index < 0 || index >= mediaEntries.size()) return;
 
-    QString filePath = mediaPaths[index];
+    QString filePath = mediaEntries[index].filePath;
+    QSharedPointer<ZipReader> reader = zipReader;
 
     QFutureWatcher<QPixmap> *watcher = new QFutureWatcher<QPixmap>();
     preloadWatchers[index] = watcher;
@@ -501,11 +534,15 @@ void ImageViewer::startPreload(int index, const QSize &targetSize)
         watcher->deleteLater();
     });
 
-    QFuture<QPixmap> future = QtConcurrent::run([filePath, targetSize]() {
-        QImageReader reader(filePath);
-        reader.setAutoTransform(true);
-        QImage image = reader.read();
-        if (!image.isNull()) {
+    QFuture<QPixmap> future = QtConcurrent::run([filePath, reader, targetSize]() -> QPixmap {
+        QString errorString;
+        QByteArray data = reader->readFile(filePath, &errorString);
+        if (data.isEmpty()) {
+            return QPixmap();
+        }
+
+        QImage image;
+        if (image.loadFromData(data)) {
             QPixmap pixmap = QPixmap::fromImage(image);
             return pixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         }
