@@ -249,6 +249,20 @@ void MainWindow::goBack() {
 
 void MainWindow::goUp() {
     if (currentPath.isEmpty()) return;
+    
+    // 如果当前在 ZIP 文件中，返回 ZIP 所在的文件夹
+    if (isZipFile(currentPath)) {
+        QFileInfo zi(currentPath);
+        QString parentDir = zi.absolutePath();
+        addToHistory(parentDir);
+        currentPath = parentDir;
+        populateTree(currentPath);
+        loadMediaFiles(currentPath, false);
+        updateNavigationButtons(currentPath);
+        setWindowTitle("媒体查看器 - " + parentDir);
+        return;
+    }
+    
     QDir d(currentPath);
     if (d.cdUp()) {
         addToHistory(d.absolutePath());
@@ -260,7 +274,12 @@ void MainWindow::goUp() {
 
 void MainWindow::updateNavigationButtons(const QString &p) {
     backButton->setEnabled(historyIndex > 0);
-    upButton->setEnabled(!p.isEmpty() && QDir(p).cdUp());
+    // ZIP 文件也可以向上（返回 ZIP 所在文件夹）
+    if (isZipFile(p)) {
+        upButton->setEnabled(true);
+    } else {
+        upButton->setEnabled(!p.isEmpty() && QDir(p).cdUp());
+    }
 }
 
 void MainWindow::addToHistory(const QString &p) {
@@ -338,9 +357,11 @@ void MainWindow::loadZipFile(const QString &zipPath) {
         if (ZipReader::isImageFile(e.fileName)) imageCount++;
         else if (ZipReader::isVideoFile(e.fileName)) videoCount++;
     }
+    currentPath = zipPath;  // 设置当前路径为 ZIP 文件路径
     pathEdit->setText(zipPath + " (ZIP)");
     updateStats();
     loadNextBatch();
+    updateNavigationButtons(currentPath);  // 更新导航按钮状态
     setWindowTitle("媒体查看器 - " + zi.fileName());
 }
 
