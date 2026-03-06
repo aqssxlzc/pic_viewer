@@ -15,6 +15,7 @@
 #include <QTreeWidget>
 #include <QSplitter>
 #include <QLineEdit>
+#include <QMap>
 #include "imageviewer.h"
 #include "zipreader.h"
 
@@ -28,7 +29,6 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-    // 用于 MediaGrid 访问 ZIP 条目
     QSharedPointer<ZipReader> getCurrentZipReader() const { return currentZipReader; }
     QList<ZipReader::ZipEntry> getZipEntries() const { return zipEntries; }
 
@@ -48,7 +48,6 @@ protected:
 
 private:
     void setupUI();
-    void setupMenuBar();
     void setupFileTree();
     void setupMediaArea();
     void populateTree(const QString &path);
@@ -61,7 +60,6 @@ private:
     void addToHistory(const QString &path);
     bool isZipFile(const QString &path) const;
 
-    // 主布局组件
     QSplitter *mainSplitter;
     QWidget *leftPanel;
     QTreeWidget *fileTree;
@@ -89,7 +87,6 @@ private:
     bool sortAscending;
     int lastScrollPosition;
 
-    // ZIP 文件支持
     QSharedPointer<ZipReader> currentZipReader;
     QList<ZipReader::ZipEntry> zipEntries;
 };
@@ -116,6 +113,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void relayout();
@@ -125,9 +123,9 @@ private:
     int itemSize;
     int spacing;
 
-    // ZIP 文件支持
     QList<ZipReader::ZipEntry> zipEntries;
     QSharedPointer<ZipReader> zipReader;
+    QMap<QWidget*, QString> zipItemPaths;
 };
 
 #endif // MAINWINDOW_H

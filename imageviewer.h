@@ -44,7 +44,7 @@ private:
 
     // 预加载相关
     void preloadAdjacent();
-    void startPreload(int index, const QSize &targetSize);
+    void startPreload(int index);
 
     // 双缓冲相关
     QLabel* getAvailableLabel();
