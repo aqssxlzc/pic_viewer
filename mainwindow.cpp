@@ -3,6 +3,10 @@
 #include "zipmediaitem.h"
 #include "zipimageviewer.h"
 #include <QDir>
+#include <QScreen>
+#include <QApplication>
+#include <QtConcurrent>
+#include <QImageReader>
 #include <QHBoxLayout>
 #include <QScrollBar>
 #include <QApplication>
@@ -19,12 +23,120 @@
 #include <algorithm>
 #include <QFileIconProvider>
 
+// PreloadWorker 实现
+PreloadWorker::PreloadWorker(QObject *parent)
+    : QObject(parent)
+{
+    QScreen *screen = QApplication::primaryScreen();
+    m_targetSize = screen ? screen->geometry().size() * 0.9 : QSize(1920, 1080);
+}
+
+void PreloadWorker::stop()
+{
+    m_stopped = true;
+}
+
+void PreloadWorker::preloadFolder(const QStringList &paths)
+{
+    m_stopped = false;
+    // 先加载后面的图片（优先），再加载前面的
+    // 假设用户会从前往后浏览，后面的图片优先级更高
+    int total = paths.size();
+    
+    // 先加载后半部分
+    for (int i = total / 2; i < total && !m_stopped; ++i) {
+        QPixmap pixmap = loadAndScale(paths[i], m_targetSize);
+        if (!pixmap.isNull() && !m_stopped) {
+            emit imagePreloaded(i, pixmap);
+        }
+    }
+    
+    // 再加载前半部分
+    for (int i = 0; i < total / 2 && !m_stopped; ++i) {
+        QPixmap pixmap = loadAndScale(paths[i], m_targetSize);
+        if (!pixmap.isNull() && !m_stopped) {
+            emit imagePreloaded(i, pixmap);
+        }
+    }
+}
+
+void PreloadWorker::preloadZip(QSharedPointer<ZipReader> reader, const QList<ZipReader::ZipEntry> &entries)
+{
+    m_stopped = false;
+    int total = entries.size();
+    
+    // 先加载后半部分
+    for (int i = total / 2; i < total && !m_stopped; ++i) {
+        if (ZipReader::isImageFile(entries[i].fileName)) {
+            QPixmap pixmap = loadAndScaleZip(reader, entries[i].filePath, m_targetSize);
+            if (!pixmap.isNull() && !m_stopped) {
+                emit imagePreloaded(i, pixmap);
+            }
+        }
+    }
+    
+    // 再加载前半部分
+    for (int i = 0; i < total / 2 && !m_stopped; ++i) {
+        if (ZipReader::isImageFile(entries[i].fileName)) {
+            QPixmap pixmap = loadAndScaleZip(reader, entries[i].filePath, m_targetSize);
+            if (!pixmap.isNull() && !m_stopped) {
+                emit imagePreloaded(i, pixmap);
+            }
+        }
+    }
+}
+
+QPixmap PreloadWorker::loadAndScale(const QString &path, const QSize &targetSize)
+{
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    QImage image = reader.read();
+    if (image.isNull()) return QPixmap();
+    
+    if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+        QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+        image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+    return QPixmap::fromImage(image);
+}
+
+QPixmap PreloadWorker::loadAndScaleZip(QSharedPointer<ZipReader> reader, const QString &path, const QSize &targetSize)
+{
+    QString errorString;
+    QByteArray data = reader->readFile(path, &errorString);
+    if (data.isEmpty()) return QPixmap();
+    
+    QImage image;
+    if (!image.loadFromData(data)) return QPixmap();
+    
+    if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+        QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+        image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+    return QPixmap::fromImage(image);
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), currentBatch(0), batchSize(30), imageCount(0), videoCount(0),
-      historyIndex(-1), sortAscending(false), lastScrollPosition(0), preZipScrollPosition(0)
+      historyIndex(-1), sortAscending(false), lastScrollPosition(0), preZipScrollPosition(0),
+      preloadThread(nullptr), preloadWorker(nullptr)
 {
     imageExtensions << "jpg" << "jpeg" << "png" << "gif" << "bmp" << "webp" << "svg";
     videoExtensions << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm";
+    
+    // 创建预加载线程
+    preloadThread = new QThread(this);
+    preloadWorker = new PreloadWorker();
+    preloadWorker->moveToThread(preloadThread);
+    connect(preloadWorker, &PreloadWorker::imagePreloaded, this, [this](int index, const QPixmap &pixmap) {
+        if (zipEntries.isEmpty() && index < allFiles.size()) {
+            thumbnailCache[allFiles[index].absoluteFilePath()] = pixmap;
+        } else if (index < zipEntries.size()) {
+            zipImageCache[index] = pixmap;
+        }
+    });
+    preloadThread->start();
+    
     setupUI();
     loadTimer = new QTimer(this);
     loadTimer->setSingleShot(true);
@@ -40,7 +152,15 @@ MainWindow::MainWindow(QWidget *parent)
     }
 }
 
-MainWindow::~MainWindow() {}
+MainWindow::~MainWindow()
+{
+    stopPreload();
+    if (preloadThread) {
+        preloadThread->quit();
+        preloadThread->wait();
+        delete preloadWorker;
+    }
+}
 
 void MainWindow::setupUI() {
     setWindowTitle("媒体文件查看器");
@@ -383,12 +503,15 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 }
 
 void MainWindow::clearCurrentView() {
+    stopPreload();
     mediaGrid->clear();
     mediaGrid->setZipReader(nullptr);
     allFiles.clear();
     zipEntries.clear();
     currentZipReader.reset();
     currentBatch = imageCount = videoCount = 0;
+    thumbnailCache.clear();
+    zipImageCache.clear();
 }
 
 void MainWindow::loadMediaFiles(const QString &dir, bool restore) {
@@ -404,6 +527,9 @@ void MainWindow::loadMediaFiles(const QString &dir, bool restore) {
     updateStats();
     loadNextBatch();
     if (restore && lastScrollPosition > 0) QTimer::singleShot(150, [this] { scrollArea->verticalScrollBar()->setValue(qMin(lastScrollPosition, scrollArea->verticalScrollBar()->maximum())); });
+    
+    // 开始预加载图片
+    startPreload();
 }
 
 void MainWindow::loadNextBatch() {
@@ -529,5 +655,41 @@ void MediaGrid::updateVisibleItems(const QRect &vr) {
     for (auto *w : items) {
         if (auto *i = qobject_cast<MediaItem*>(w)) i->setActive(i->geometry().intersects(vr));
         else if (auto *z = qobject_cast<ZipMediaItem*>(w)) z->setActive(z->geometry().intersects(vr));
+    }
+}
+
+void MainWindow::startPreload()
+{
+    if (!preloadWorker) return;
+    
+    stopPreload();
+    
+    thumbnailCache.clear();
+    zipImageCache.clear();
+    
+    if (zipEntries.isEmpty() && !allFiles.isEmpty()) {
+        // 预加载文件夹
+        QStringList paths;
+        for (const auto &file : allFiles) {
+            QString ext = file.suffix().toLower();
+            if (imageExtensions.contains(ext)) {
+                paths << file.absoluteFilePath();
+            }
+        }
+        if (!paths.isEmpty()) {
+            QMetaObject::invokeMethod(preloadWorker, "preloadFolder", Qt::QueuedConnection, Q_ARG(QStringList, paths));
+        }
+    } else if (!zipEntries.isEmpty() && currentZipReader) {
+        // 预加载 ZIP
+        QMetaObject::invokeMethod(preloadWorker, "preloadZip", Qt::QueuedConnection, 
+                                   Q_ARG(QSharedPointer<ZipReader>, currentZipReader),
+                                   Q_ARG(QList<ZipReader::ZipEntry>, zipEntries));
+    }
+}
+
+void MainWindow::stopPreload()
+{
+    if (preloadWorker) {
+        preloadWorker->stop();
     }
 }

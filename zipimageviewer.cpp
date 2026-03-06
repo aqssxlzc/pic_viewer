@@ -282,7 +282,7 @@ void ZipImageViewer::displayImage(int index)
     if (image.loadFromData(data)) {
         // 获取目标尺寸并缩放
         QScreen *screen = QApplication::primaryScreen();
-        QSize targetSize = screen ? screen->geometry().size() * 0.9 : size() * 0.9;
+        QSize targetSize = screen ? screen->geometry().size() : size();
         if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
             QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
             image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -463,7 +463,7 @@ void ZipImageViewer::resizeEvent(QResizeEvent *event)
     if (!isVideo && !currentPixmap.isNull()) {
         // 窗口大小变化时重新缩放当前图片
         QScreen *screen = QApplication::primaryScreen();
-        QSize targetSize = screen ? screen->geometry().size() * 0.9 : size() * 0.9;
+        QSize targetSize = screen ? screen->geometry().size() : size();
         
         // 重新加载当前图片
         if (!mediaEntries.isEmpty() && currentIndex >= 0 && currentIndex < mediaEntries.size()) {
@@ -532,7 +532,7 @@ void ZipImageViewer::startPreload(int index)
 
     // 获取目标尺寸用于预缩放
     QScreen *screen = QApplication::primaryScreen();
-    QSize targetSize = screen ? screen->geometry().size() * 0.9 : QSize(1920, 1080);
+    QSize targetSize = screen ? screen->geometry().size() : QSize(1920, 1080);
 
     QFutureWatcher<QPixmap> *watcher = new QFutureWatcher<QPixmap>();
     preloadWatchers[index] = watcher;

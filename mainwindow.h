@@ -16,8 +16,31 @@
 #include <QSplitter>
 #include <QLineEdit>
 #include <QMap>
+#include <QThread>
+#include <QMutex>
+#include <QWaitCondition>
 #include "imageviewer.h"
 #include "zipreader.h"
+
+// 后台预加载线程
+class PreloadWorker : public QObject
+{
+    Q_OBJECT
+public:
+    explicit PreloadWorker(QObject *parent = nullptr);
+    void preloadFolder(const QStringList &paths);
+    void preloadZip(QSharedPointer<ZipReader> reader, const QList<ZipReader::ZipEntry> &entries);
+    void stop();
+    static QPixmap loadAndScale(const QString &path, const QSize &targetSize);
+    static QPixmap loadAndScaleZip(QSharedPointer<ZipReader> reader, const QString &path, const QSize &targetSize);
+
+signals:
+    void imagePreloaded(int index, const QPixmap &pixmap);
+
+private:
+    bool m_stopped = false;
+    QSize m_targetSize;
+};
 
 class MediaGrid;
 
@@ -90,6 +113,14 @@ private:
 
     QSharedPointer<ZipReader> currentZipReader;
     QList<ZipReader::ZipEntry> zipEntries;
+    
+    // 预加载相关
+    QThread *preloadThread;
+    PreloadWorker *preloadWorker;
+    QMap<QString, QPixmap> thumbnailCache;  // 缩略图缓存
+    QMap<int, QPixmap> zipImageCache;  // ZIP 图片缓存
+    void startPreload();
+    void stopPreload();
 };
 
 class MediaGrid : public QWidget

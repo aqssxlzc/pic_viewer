@@ -428,7 +428,7 @@ void ImageViewer::resizeEvent(QResizeEvent *event)
     } else if (!currentPixmap.isNull()) {
         // 窗口大小变化时重新缩放当前图片
         QScreen *screen = QApplication::primaryScreen();
-        QSize targetSize = screen ? screen->geometry().size() * 0.9 : size() * 0.9;
+        QSize targetSize = screen ? screen->geometry().size() : size();
         
         // 从原始图片重新加载缩放（需要重新读取文件）
         if (!mediaPaths.isEmpty() && currentIndex >= 0 && currentIndex < mediaPaths.size()) {
@@ -496,7 +496,7 @@ void ImageViewer::startPreload(int index)
 
     // 获取目标尺寸用于预缩放
     QScreen *screen = QApplication::primaryScreen();
-    QSize targetSize = screen ? screen->geometry().size() * 0.9 : QSize(1920, 1080);
+    QSize targetSize = screen ? screen->geometry().size() : QSize(1920, 1080);
 
     QFutureWatcher<QPixmap> *watcher = new QFutureWatcher<QPixmap>();
     preloadWatchers[index] = watcher;
