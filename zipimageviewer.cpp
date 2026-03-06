@@ -23,6 +23,7 @@ ZipImageViewer::ZipImageViewer(const QString &filePath,
     , currentLabelIndex(0)
     , videoPlayTimer(nullptr)
     , videoBuffer(nullptr)
+    , currentZipIndex(-1)
     , audioOutput(nullptr)
 {
     // 找到当前文件在列表中的索引
@@ -408,16 +409,28 @@ void ZipImageViewer::keyPressEvent(QKeyEvent *event)
             close();
             break;
         case Qt::Key_Left:
-        case Qt::Key_A:
         case Qt::Key_Up:
         case Qt::Key_W:
             showPrevious();
             break;
         case Qt::Key_Right:
-        case Qt::Key_D:
         case Qt::Key_Down:
         case Qt::Key_S:
             showNext();
+            break;
+        case Qt::Key_A:
+            // 切换到前一个 ZIP 文件
+            if (!adjacentZipFiles.isEmpty() && currentZipIndex > 0) {
+                emit switchToZip(adjacentZipFiles[currentZipIndex - 1]);
+                close();
+            }
+            break;
+        case Qt::Key_D:
+            // 切换到后一个 ZIP 文件
+            if (!adjacentZipFiles.isEmpty() && currentZipIndex < adjacentZipFiles.size() - 1) {
+                emit switchToZip(adjacentZipFiles[currentZipIndex + 1]);
+                close();
+            }
             break;
         case Qt::Key_Home:
             currentIndex = 0;
@@ -571,4 +584,18 @@ void ZipImageViewer::startPreload(int index)
     });
 
     watcher->setFuture(future);
+}
+
+void ZipImageViewer::setAdjacentZipFiles(const QStringList &zipFiles, int index)
+{
+    adjacentZipFiles = zipFiles;
+    currentZipIndex = index;
+}
+
+QString ZipImageViewer::currentZipPath() const
+{
+    if (currentZipIndex >= 0 && currentZipIndex < adjacentZipFiles.size()) {
+        return adjacentZipFiles[currentZipIndex];
+    }
+    return QString();
 }

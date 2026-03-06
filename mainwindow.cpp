@@ -119,7 +119,7 @@ QPixmap PreloadWorker::loadAndScaleZip(QSharedPointer<ZipReader> reader, const Q
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), currentBatch(0), batchSize(30), imageCount(0), videoCount(0),
       historyIndex(-1), sortAscending(false), lastScrollPosition(0), preZipScrollPosition(0),
-      preloadThread(nullptr), preloadWorker(nullptr)
+      currentZipIndex(-1), preloadThread(nullptr), preloadWorker(nullptr)
 {
     imageExtensions << "jpg" << "jpeg" << "png" << "gif" << "bmp" << "webp" << "svg";
     videoExtensions << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm";
@@ -268,6 +268,10 @@ void MainWindow::setupMediaArea() {
     });
     connect(mediaGrid, &MediaGrid::zipMediaClicked, this, [this](const QString &fp, const QList<ZipReader::ZipEntry> &, QSharedPointer<ZipReader> zr) {
         auto *v = new ZipImageViewer(fp, zipEntries, zr);
+        v->setAdjacentZipFiles(adjacentZipFiles, currentZipIndex);
+        connect(v, &ZipImageViewer::switchToZip, this, [this](const QString &path) {
+            loadZipFile(path);
+        });
         v->setAttribute(Qt::WA_DeleteOnClose);
         v->show();
     });
@@ -491,6 +495,7 @@ void MainWindow::loadZipFile(const QString &zipPath) {
     updateStats();
     loadNextBatch();
     updateNavigationButtons(currentPath);  // 更新导航按钮状态
+    updateAdjacentZipList();  // 更新相邻 ZIP 列表
     setWindowTitle("媒体查看器 - " + zi.fileName());
 }
 
@@ -692,4 +697,62 @@ void MainWindow::stopPreload()
     if (preloadWorker) {
         preloadWorker->stop();
     }
+}
+
+void MainWindow::updateAdjacentZipList()
+{
+    adjacentZipFiles.clear();
+    currentZipIndex = -1;
+    
+    if (!isZipFile(currentPath)) return;
+    
+    QFileInfo zi(currentPath);
+    QString parentDir = zi.absolutePath();
+    QDir dir(parentDir);
+    
+    // 获取目录下所有 ZIP 文件并排序
+    QStringList zips;
+    for (const auto &f : dir.entryInfoList(QStringList() << "*.zip", QDir::Files, QDir::Name)) {
+        zips << f.absoluteFilePath();
+    }
+    
+    adjacentZipFiles = zips;
+    currentZipIndex = zips.indexOf(currentPath);
+}
+
+void MainWindow::switchToAdjacentZip(int offset)
+{
+    if (!isZipFile(currentPath)) return;
+    
+    // 更新 ZIP 列表（如果还没有）
+    if (adjacentZipFiles.isEmpty() || currentZipIndex < 0) {
+        updateAdjacentZipList();
+    }
+    
+    int newIndex = currentZipIndex + offset;
+    if (newIndex < 0 || newIndex >= adjacentZipFiles.size()) {
+        // 没有更多的 ZIP 文件
+        return;
+    }
+    
+    QString newZipPath = adjacentZipFiles[newIndex];
+    addToHistory(newZipPath);
+    currentPath = newZipPath;
+    loadZipFile(newZipPath);
+}
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    // 只在 ZIP 文件中响应 A/D 键
+    if (isZipFile(currentPath)) {
+        if (event->key() == Qt::Key_A) {
+            switchToAdjacentZip(-1);  // 前一个 ZIP
+            return;
+        } else if (event->key() == Qt::Key_D) {
+            switchToAdjacentZip(1);   // 后一个 ZIP
+            return;
+        }
+    }
+    
+    QMainWindow::keyPressEvent(event);
 }

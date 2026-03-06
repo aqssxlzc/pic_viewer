@@ -21,6 +21,7 @@
 /**
  * ZIP 压缩包内媒体文件的查看器
  * 支持图片和视频浏览，支持左右键切换
+ * A/D 键切换相邻 ZIP 文件
  */
 class ZipImageViewer : public QDialog
 {
@@ -32,6 +33,15 @@ public:
                            QSharedPointer<ZipReader> zipReader,
                            QWidget *parent = nullptr);
     ~ZipImageViewer();
+
+    // 设置相邻 ZIP 文件列表和当前索引
+    void setAdjacentZipFiles(const QStringList &zipFiles, int currentIndex);
+
+    // 获取当前 ZIP 路径
+    QString currentZipPath() const;
+
+signals:
+    void switchToZip(const QString &zipPath);  // 切换到指定 ZIP
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -87,6 +97,10 @@ private:
     QMap<int, QPixmap> pixmapCache;
     QMap<int, QFutureWatcher<QPixmap>*> preloadWatchers;
     QMutex cacheMutex;
+
+    // 相邻 ZIP 文件导航
+    QStringList adjacentZipFiles;
+    int currentZipIndex;
 };
 
 #endif // ZIPIMAGEVIEWER_H

@@ -19,6 +19,7 @@
 #include <QThread>
 #include <QMutex>
 #include <QWaitCondition>
+#include <QKeyEvent>
 #include "imageviewer.h"
 #include "zipreader.h"
 
@@ -68,6 +69,7 @@ private slots:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 private:
     void setupUI();
@@ -82,6 +84,8 @@ private:
     void updateNavigationButtons(const QString &path);
     void addToHistory(const QString &path);
     bool isZipFile(const QString &path) const;
+    void switchToAdjacentZip(int offset);  // -1 = 前, 1 = 后
+    void updateAdjacentZipList();           // 更新相邻 ZIP 列表
 
     QSplitter *mainSplitter;
     QWidget *leftPanel;
@@ -113,6 +117,10 @@ private:
 
     QSharedPointer<ZipReader> currentZipReader;
     QList<ZipReader::ZipEntry> zipEntries;
+
+    // 相邻 ZIP 文件导航
+    QStringList adjacentZipFiles;   // 当前目录下的 ZIP 文件列表
+    int currentZipIndex;            // 当前 ZIP 在列表中的索引
     
     // 预加载相关
     QThread *preloadThread;

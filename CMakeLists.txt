@@ -13,9 +13,19 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets Concurrent)
 
-# Find libzip
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBZIP REQUIRED libzip)
+# Find libzip - check local deps first, then system
+set(LIBZIP_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/deps/libzip/include")
+set(LIBZIP_LIBRARY "${CMAKE_SOURCE_DIR}/deps/libzip/lib/libzip.dll.a")
+
+if(NOT EXISTS "${LIBZIP_INCLUDE_DIR}/zip.h" OR NOT EXISTS "${LIBZIP_LIBRARY}")
+    # Fall back to pkg-config
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBZIP REQUIRED libzip)
+else()
+    message(STATUS "Using local libzip: ${LIBZIP_INCLUDE_DIR}")
+    set(LIBZIP_INCLUDE_DIRS ${LIBZIP_INCLUDE_DIR})
+    set(LIBZIP_LIBRARIES ${LIBZIP_LIBRARY})
+endif()
 
 add_executable(MediaViewer
     main.cpp
