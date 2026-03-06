@@ -72,7 +72,7 @@ private:
     QTimer *videoPlayTimer;
 
     // 预加载缓存
-    static const int PRELOAD_RANGE = 3;
+    static const int PRELOAD_RANGE = 50;  // 前后各预加载50张
     QMap<int, QPixmap> pixmapCache;
     QMap<int, QFutureWatcher<QPixmap>*> preloadWatchers;
     QMutex cacheMutex;

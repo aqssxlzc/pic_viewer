@@ -280,6 +280,13 @@ void ZipImageViewer::displayImage(int index)
 
     QImage image;
     if (image.loadFromData(data)) {
+        // 获取目标尺寸并缩放
+        QScreen *screen = QApplication::primaryScreen();
+        QSize targetSize = screen ? screen->geometry().size() * 0.9 : size() * 0.9;
+        if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+            QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+            image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
         currentPixmap = QPixmap::fromImage(image);
         updateImage();
     }
@@ -344,18 +351,9 @@ void ZipImageViewer::updateImage()
         return;
     }
 
-    // 使用屏幕尺寸，而不是窗口尺寸（窗口可能还没有完全显示）
-    QScreen *screen = QApplication::primaryScreen();
-    QSize screenSize = screen ? screen->geometry().size() : size();
-
-    QPixmap scaledPixmap = currentPixmap.scaled(
-        screenSize * 0.9,
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation
-    );
-
+    // 直接显示，缩放已在加载或预加载时完成
     QLabel *label = getAvailableLabel();
-    label->setPixmap(scaledPixmap);
+    label->setPixmap(currentPixmap);
     switchToLabel(label);
 }
 
@@ -463,15 +461,27 @@ void ZipImageViewer::resizeEvent(QResizeEvent *event)
     playPauseButton->move(width() / 2 - 30, height() - 100);
 
     if (!isVideo && !currentPixmap.isNull()) {
+        // 窗口大小变化时重新缩放当前图片
         QScreen *screen = QApplication::primaryScreen();
-        QSize screenSize = screen ? screen->geometry().size() : size();
-        QPixmap scaledPixmap = currentPixmap.scaled(
-            screenSize * 0.9,
-            Qt::KeepAspectRatio,
-            Qt::SmoothTransformation
-        );
-        QLabel *currentLabel = imageLabels[currentLabelIndex];
-        currentLabel->setPixmap(scaledPixmap);
+        QSize targetSize = screen ? screen->geometry().size() * 0.9 : size() * 0.9;
+        
+        // 重新加载当前图片
+        if (!mediaEntries.isEmpty() && currentIndex >= 0 && currentIndex < mediaEntries.size()) {
+            QString errorString;
+            QByteArray data = zipReader->readFile(mediaEntries[currentIndex].filePath, &errorString);
+            if (!data.isEmpty()) {
+                QImage image;
+                if (image.loadFromData(data)) {
+                    if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+                        QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+                        image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                    }
+                    currentPixmap = QPixmap::fromImage(image);
+                    QLabel *currentLabel = imageLabels[currentLabelIndex];
+                    currentLabel->setPixmap(currentPixmap);
+                }
+            }
+        }
     }
 
     QMutexLocker locker(&cacheMutex);
@@ -520,6 +530,10 @@ void ZipImageViewer::startPreload(int index)
     QString filePath = mediaEntries[index].filePath;
     QSharedPointer<ZipReader> reader = zipReader;
 
+    // 获取目标尺寸用于预缩放
+    QScreen *screen = QApplication::primaryScreen();
+    QSize targetSize = screen ? screen->geometry().size() * 0.9 : QSize(1920, 1080);
+
     QFutureWatcher<QPixmap> *watcher = new QFutureWatcher<QPixmap>();
     preloadWatchers[index] = watcher;
 
@@ -536,8 +550,8 @@ void ZipImageViewer::startPreload(int index)
         watcher->deleteLater();
     });
 
-    // 预加载时不缩放，存储原始尺寸，显示时再缩放
-    QFuture<QPixmap> future = QtConcurrent::run([filePath, reader]() -> QPixmap {
+    // 在后台线程预先缩放到目标尺寸
+    QFuture<QPixmap> future = QtConcurrent::run([filePath, reader, targetSize]() -> QPixmap {
         QString errorString;
         QByteArray data = reader->readFile(filePath, &errorString);
         if (data.isEmpty()) {
@@ -546,6 +560,11 @@ void ZipImageViewer::startPreload(int index)
 
         QImage image;
         if (image.loadFromData(data)) {
+            // 预先缩放
+            if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+                QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+                image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
             return QPixmap::fromImage(image);
         }
         return QPixmap();

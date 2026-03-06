@@ -311,19 +311,9 @@ void ImageViewer::updateImage()
         return;
     }
 
-    // 使用屏幕尺寸，而不是窗口尺寸（窗口可能还没有完全显示）
-    QScreen *screen = QApplication::primaryScreen();
-    QSize screenSize = screen ? screen->geometry().size() : size();
-
-    // Scale image to fit screen while maintaining aspect ratio
-    QPixmap scaledPixmap = currentPixmap.scaled(
-        screenSize * 0.9,
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation
-    );
-
+    // 直接显示，缩放已在加载或预加载时完成
     QLabel *label = getAvailableLabel();
-    label->setPixmap(scaledPixmap);
+    label->setPixmap(currentPixmap);
     switchToLabel(label);
 }
 
@@ -436,15 +426,25 @@ void ImageViewer::resizeEvent(QResizeEvent *event)
     if (isVideo) {
         updateVideo();
     } else if (!currentPixmap.isNull()) {
+        // 窗口大小变化时重新缩放当前图片
         QScreen *screen = QApplication::primaryScreen();
-        QSize screenSize = screen ? screen->geometry().size() : size();
-        QPixmap scaledPixmap = currentPixmap.scaled(
-            screenSize * 0.9,
-            Qt::KeepAspectRatio,
-            Qt::SmoothTransformation
-        );
-        QLabel *currentLabel = imageLabels[currentLabelIndex];
-        currentLabel->setPixmap(scaledPixmap);
+        QSize targetSize = screen ? screen->geometry().size() * 0.9 : size() * 0.9;
+        
+        // 从原始图片重新加载缩放（需要重新读取文件）
+        if (!mediaPaths.isEmpty() && currentIndex >= 0 && currentIndex < mediaPaths.size()) {
+            QImageReader reader(mediaPaths[currentIndex]);
+            reader.setAutoTransform(true);
+            QImage image = reader.read();
+            if (!image.isNull()) {
+                if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+                    QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+                    image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                }
+                currentPixmap = QPixmap::fromImage(image);
+                QLabel *currentLabel = imageLabels[currentLabelIndex];
+                currentLabel->setPixmap(currentPixmap);
+            }
+        }
     }
 
     // 清除缓存，窗口大小变了需要重新缩放
@@ -494,6 +494,10 @@ void ImageViewer::startPreload(int index)
 
     QString filePath = mediaPaths[index];
 
+    // 获取目标尺寸用于预缩放
+    QScreen *screen = QApplication::primaryScreen();
+    QSize targetSize = screen ? screen->geometry().size() * 0.9 : QSize(1920, 1080);
+
     QFutureWatcher<QPixmap> *watcher = new QFutureWatcher<QPixmap>();
     preloadWatchers[index] = watcher;
 
@@ -510,12 +514,17 @@ void ImageViewer::startPreload(int index)
         watcher->deleteLater();
     });
 
-    // 预加载时不缩放，存储原始尺寸，显示时再缩放
-    QFuture<QPixmap> future = QtConcurrent::run([filePath]() {
+    // 在后台线程预先缩放到目标尺寸
+    QFuture<QPixmap> future = QtConcurrent::run([filePath, targetSize]() {
         QImageReader reader(filePath);
         reader.setAutoTransform(true);
         QImage image = reader.read();
         if (!image.isNull()) {
+            // 预先缩放
+            if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+                QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+                image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
             return QPixmap::fromImage(image);
         }
         return QPixmap();
