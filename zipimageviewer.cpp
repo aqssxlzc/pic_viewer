@@ -675,12 +675,12 @@ void ZipImageViewer::toggleDualDisplayMode()
 {
     switch (dualMode) {
         case DualDisplayMode::Single:
-            dualMode = DualDisplayMode::DualNextLeft;
-            break;
-        case DualDisplayMode::DualNextLeft:
             dualMode = DualDisplayMode::DualNextRight;
             break;
         case DualDisplayMode::DualNextRight:
+            dualMode = DualDisplayMode::DualNextLeft;
+            break;
+        case DualDisplayMode::DualNextLeft:
             dualMode = DualDisplayMode::Single;
             break;
     }

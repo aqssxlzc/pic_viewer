@@ -776,5 +776,10 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         }
     }
 
+    if (event->key() == Qt::Key_Escape) {
+        close();
+        return;
+    }
+
     QMainWindow::keyPressEvent(event);
 }
