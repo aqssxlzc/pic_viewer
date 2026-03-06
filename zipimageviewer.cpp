@@ -34,10 +34,13 @@ ZipImageViewer::ZipImageViewer(const QString &filePath,
     }
 
     setupUI();
-    loadMedia();
 
+    // 先设置全屏，确保 size() 返回正确的全屏尺寸
     setWindowState(Qt::WindowFullScreen);
     setModal(true);
+
+    // 全屏后再加载媒体
+    loadMedia();
 }
 
 ZipImageViewer::~ZipImageViewer()
@@ -257,15 +260,12 @@ void ZipImageViewer::displayImage(int index)
 
     ZipReader::ZipEntry entry = mediaEntries[index];
 
-    // 检查缓存
+    // 检查缓存（缓存的是原始尺寸，需要缩放显示）
     {
         QMutexLocker locker(&cacheMutex);
         if (pixmapCache.contains(index)) {
-            QPixmap pixmap = pixmapCache[index];
-            QLabel *label = getAvailableLabel();
-            label->setPixmap(pixmap);
-            switchToLabel(label);
-            currentPixmap = pixmap;
+            currentPixmap = pixmapCache[index];
+            updateImage();
             return;
         }
     }
@@ -344,7 +344,9 @@ void ZipImageViewer::updateImage()
         return;
     }
 
-    QSize screenSize = size();
+    // 使用屏幕尺寸，而不是窗口尺寸（窗口可能还没有完全显示）
+    QScreen *screen = QApplication::primaryScreen();
+    QSize screenSize = screen ? screen->geometry().size() : size();
 
     QPixmap scaledPixmap = currentPixmap.scaled(
         screenSize * 0.9,
@@ -461,8 +463,10 @@ void ZipImageViewer::resizeEvent(QResizeEvent *event)
     playPauseButton->move(width() / 2 - 30, height() - 100);
 
     if (!isVideo && !currentPixmap.isNull()) {
+        QScreen *screen = QApplication::primaryScreen();
+        QSize screenSize = screen ? screen->geometry().size() : size();
         QPixmap scaledPixmap = currentPixmap.scaled(
-            size() * 0.9,
+            screenSize * 0.9,
             Qt::KeepAspectRatio,
             Qt::SmoothTransformation
         );
@@ -478,8 +482,6 @@ void ZipImageViewer::resizeEvent(QResizeEvent *event)
 
 void ZipImageViewer::preloadAdjacent()
 {
-    QSize targetSize = size() * 0.9;
-
     // 取消未完成的预加载
     for (auto it = preloadWatchers.begin(); it != preloadWatchers.end(); ) {
         if (it.value() && !it.value()->isFinished()) {
@@ -506,12 +508,12 @@ void ZipImageViewer::preloadAdjacent()
             if (pixmapCache.contains(preloadIndex)) {
                 continue;
             }
-            startPreload(preloadIndex, targetSize);
+            startPreload(preloadIndex);
         }
     }
 }
 
-void ZipImageViewer::startPreload(int index, const QSize &targetSize)
+void ZipImageViewer::startPreload(int index)
 {
     if (index < 0 || index >= mediaEntries.size()) return;
 
@@ -534,7 +536,8 @@ void ZipImageViewer::startPreload(int index, const QSize &targetSize)
         watcher->deleteLater();
     });
 
-    QFuture<QPixmap> future = QtConcurrent::run([filePath, reader, targetSize]() -> QPixmap {
+    // 预加载时不缩放，存储原始尺寸，显示时再缩放
+    QFuture<QPixmap> future = QtConcurrent::run([filePath, reader]() -> QPixmap {
         QString errorString;
         QByteArray data = reader->readFile(filePath, &errorString);
         if (data.isEmpty()) {
@@ -543,8 +546,7 @@ void ZipImageViewer::startPreload(int index, const QSize &targetSize)
 
         QImage image;
         if (image.loadFromData(data)) {
-            QPixmap pixmap = QPixmap::fromImage(image);
-            return pixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            return QPixmap::fromImage(image);
         }
         return QPixmap();
     });

@@ -236,11 +236,17 @@ void ImageViewer::displayImage(int index)
     }
 
     // 同步加载当前图片
+
+    // 同步加载当前图片
     QImageReader reader(filePath);
     reader.setAutoTransform(true);
     QImage image = reader.read();
     if (!image.isNull()) {
         currentPixmap = QPixmap::fromImage(image);
+        qDebug() << "displayImage: loaded, index=" << index 
+                 << "pixmap size=" << currentPixmap.size() 
+                 << "window size=" << size()
+                 << "screen size=" << (QApplication::primaryScreen() ? QApplication::primaryScreen()->geometry().size() : QSize());
         updateImage();
     }
 }
