@@ -743,7 +743,7 @@ void MainWindow::switchToAdjacentZip(int offset)
 
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
-    // 只在 ZIP 文件中响应 A/D 键
+    // 只在 ZIP 文件中响应 A/D 键和空格键
     if (isZipFile(currentPath)) {
         if (event->key() == Qt::Key_A) {
             switchToAdjacentZip(-1);  // 前一个 ZIP
@@ -751,8 +751,30 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         } else if (event->key() == Qt::Key_D) {
             switchToAdjacentZip(1);   // 后一个 ZIP
             return;
+        } else if (event->key() == Qt::Key_Space) {
+            // 空格键：从第一张图片开始大图浏览
+            if (!zipEntries.isEmpty() && currentZipReader) {
+                // 找到第一张图片
+                int firstImageIndex = -1;
+                for (int i = 0; i < zipEntries.size(); ++i) {
+                    if (ZipReader::isImageFile(zipEntries[i].fileName)) {
+                        firstImageIndex = i;
+                        break;
+                    }
+                }
+                if (firstImageIndex >= 0) {
+                    auto *v = new ZipImageViewer(zipEntries[firstImageIndex].filePath, zipEntries, currentZipReader);
+                    v->setAdjacentZipFiles(adjacentZipFiles, currentZipIndex);
+                    connect(v, &ZipImageViewer::switchToZip, this, [this](const QString &path) {
+                        loadZipFile(path);
+                    });
+                    v->setAttribute(Qt::WA_DeleteOnClose);
+                    v->show();
+                }
+            }
+            return;
         }
     }
-    
+
     QMainWindow::keyPressEvent(event);
 }
