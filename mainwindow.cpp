@@ -21,7 +21,7 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), currentBatch(0), batchSize(30), imageCount(0), videoCount(0),
-      historyIndex(-1), sortAscending(false), lastScrollPosition(0)
+      historyIndex(-1), sortAscending(false), lastScrollPosition(0), preZipScrollPosition(0)
 {
     imageExtensions << "jpg" << "jpeg" << "png" << "gif" << "bmp" << "webp" << "svg";
     videoExtensions << "mp4" << "avi" << "mkv" << "mov" << "wmv" << "flv" << "webm";
@@ -258,6 +258,12 @@ void MainWindow::goUp() {
         currentPath = parentDir;
         populateTree(currentPath);
         loadMediaFiles(currentPath, false);
+        // 恢复进入 ZIP 前的滚动位置
+        if (preZipScrollPosition > 0) {
+            QTimer::singleShot(150, [this] {
+                scrollArea->verticalScrollBar()->setValue(preZipScrollPosition);
+            });
+        }
         updateNavigationButtons(currentPath);
         setWindowTitle("媒体查看器 - " + parentDir);
         return;
@@ -302,6 +308,9 @@ void MainWindow::openZipFile() {
 }
 
 void MainWindow::loadZipFile(const QString &zipPath) {
+    // 保存进入 ZIP 前的滚动位置
+    preZipScrollPosition = scrollArea->verticalScrollBar()->value();
+    
     // 先清理
     currentZipReader.reset();
     zipEntries.clear();

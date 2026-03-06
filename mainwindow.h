@@ -86,6 +86,7 @@ private:
     int historyIndex;
     bool sortAscending;
     int lastScrollPosition;
+    int preZipScrollPosition;  // 进入 ZIP 前的滚动位置
 
     QSharedPointer<ZipReader> currentZipReader;
     QList<ZipReader::ZipEntry> zipEntries;
