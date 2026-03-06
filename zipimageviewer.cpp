@@ -25,6 +25,10 @@ ZipImageViewer::ZipImageViewer(const QString &filePath,
     , videoBuffer(nullptr)
     , currentZipIndex(-1)
     , audioOutput(nullptr)
+    , dualMode(DualDisplayMode::Single)
+    , dualWidget(nullptr)
+    , dualLabelLeft(nullptr)
+    , dualLabelRight(nullptr)
 {
     // 找到当前文件在列表中的索引
     for (int i = 0; i < entries.size(); ++i) {
@@ -92,6 +96,27 @@ void ZipImageViewer::setupUI()
         imageStack->addWidget(label);
     }
     imageStack->setCurrentIndex(0);
+
+    // 双图显示容器
+    dualWidget = new QWidget(this);
+    QHBoxLayout *dualLayout = new QHBoxLayout(dualWidget);
+    dualLayout->setContentsMargins(0, 0, 0, 0);
+    dualLayout->setSpacing(0);
+
+    dualLabelLeft = new QLabel(dualWidget);
+    dualLabelLeft->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    dualLabelLeft->setScaledContents(false);
+    dualLabelLeft->setStyleSheet("background-color: transparent; margin: 0; padding: 0;");
+
+    dualLabelRight = new QLabel(dualWidget);
+    dualLabelRight->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    dualLabelRight->setScaledContents(false);
+    dualLabelRight->setStyleSheet("background-color: transparent; margin: 0; padding: 0;");
+
+    dualLayout->addWidget(dualLabelLeft, 1);
+    dualLayout->addWidget(dualLabelRight, 1);
+    dualWidget->hide();
+    mainLayout->addWidget(dualWidget);
 
     // 视频播放器
     videoWidget = new QVideoWidget(this);
@@ -257,7 +282,15 @@ void ZipImageViewer::displayImage(int index)
 {
     videoWidget->hide();
     playPauseButton->hide();
-    imageStack->show();
+
+    // 根据双图模式选择显示方式
+    if (dualMode == DualDisplayMode::Single) {
+        imageStack->show();
+        dualWidget->hide();
+    } else {
+        imageStack->hide();
+        dualWidget->show();
+    }
 
     ZipReader::ZipEntry entry = mediaEntries[index];
 
@@ -379,12 +412,27 @@ void ZipImageViewer::showPrevious()
         return;
     }
 
-    currentIndex--;
-    if (currentIndex < 0) {
-        currentIndex = mediaEntries.size() - 1;
+    // 双图模式下每次跳过两张
+    if (dualMode != DualDisplayMode::Single) {
+        currentIndex -= 2;
+        if (currentIndex < 0) {
+            currentIndex += mediaEntries.size();
+        }
+    } else {
+        currentIndex--;
+        if (currentIndex < 0) {
+            currentIndex = mediaEntries.size() - 1;
+        }
     }
 
     loadMedia();
+
+    // 双图模式下更新显示
+    if (dualMode != DualDisplayMode::Single && !isVideo) {
+        if (loadDualImages()) {
+            updateDualImages();
+        }
+    }
 }
 
 void ZipImageViewer::showNext()
@@ -393,12 +441,27 @@ void ZipImageViewer::showNext()
         return;
     }
 
-    currentIndex++;
-    if (currentIndex >= mediaEntries.size()) {
-        currentIndex = 0;
+    // 双图模式下每次跳过两张
+    if (dualMode != DualDisplayMode::Single) {
+        currentIndex += 2;
+        if (currentIndex >= mediaEntries.size()) {
+            currentIndex -= mediaEntries.size();
+        }
+    } else {
+        currentIndex++;
+        if (currentIndex >= mediaEntries.size()) {
+            currentIndex = 0;
+        }
     }
 
     loadMedia();
+
+    // 双图模式下更新显示
+    if (dualMode != DualDisplayMode::Single && !isVideo) {
+        if (loadDualImages()) {
+            updateDualImages();
+        }
+    }
 }
 
 void ZipImageViewer::keyPressEvent(QKeyEvent *event)
@@ -430,6 +493,12 @@ void ZipImageViewer::keyPressEvent(QKeyEvent *event)
             if (!adjacentZipFiles.isEmpty() && currentZipIndex < adjacentZipFiles.size() - 1) {
                 emit switchToZip(adjacentZipFiles[currentZipIndex + 1]);
                 close();
+            }
+            break;
+        case Qt::Key_E:
+            // 切换双图显示模式
+            if (!isVideo) {
+                toggleDualDisplayMode();
             }
             break;
         case Qt::Key_Home:
@@ -598,4 +667,167 @@ QString ZipImageViewer::currentZipPath() const
         return adjacentZipFiles[currentZipIndex];
     }
     return QString();
+}
+
+// ==================== 双图显示相关方法 ====================
+
+void ZipImageViewer::toggleDualDisplayMode()
+{
+    switch (dualMode) {
+        case DualDisplayMode::Single:
+            dualMode = DualDisplayMode::DualNextLeft;
+            break;
+        case DualDisplayMode::DualNextLeft:
+            dualMode = DualDisplayMode::DualNextRight;
+            break;
+        case DualDisplayMode::DualNextRight:
+            dualMode = DualDisplayMode::Single;
+            break;
+    }
+
+    if (dualMode == DualDisplayMode::Single) {
+        // 恢复单图显示
+        dualWidget->hide();
+        imageStack->show();
+        updateImage();
+    } else {
+        // 尝试双图显示
+        if (loadDualImages()) {
+            imageStack->hide();
+            dualWidget->show();
+            updateDualImages();
+        } else {
+            // 无法双图显示，恢复单图
+            dualMode = DualDisplayMode::Single;
+        }
+    }
+}
+
+int ZipImageViewer::findNextImageIndex(int fromIndex) const
+{
+    for (int i = fromIndex + 1; i < mediaEntries.size(); ++i) {
+        if (!isVideoFile(mediaEntries[i].fileName)) {
+            return i;
+        }
+    }
+    // 循环查找
+    for (int i = 0; i < fromIndex; ++i) {
+        if (!isVideoFile(mediaEntries[i].fileName)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool ZipImageViewer::canDisplayDual() const
+{
+    if (currentPixmap.isNull()) return false;
+
+    int nextIdx = findNextImageIndex(currentIndex);
+    if (nextIdx < 0) return false;
+
+    return true;
+}
+
+bool ZipImageViewer::loadDualImages()
+{
+    if (currentPixmap.isNull()) return false;
+
+    int nextIdx = findNextImageIndex(currentIndex);
+    if (nextIdx < 0 || nextIdx == currentIndex) return false;
+
+    // 加载下一张图片
+    ZipReader::ZipEntry entry = mediaEntries[nextIdx];
+
+    // 检查缓存
+    {
+        QMutexLocker locker(&cacheMutex);
+        if (pixmapCache.contains(nextIdx)) {
+            nextPixmap = pixmapCache[nextIdx];
+            return true;
+        }
+    }
+
+    // 同步加载
+    QString errorString;
+    QByteArray data = zipReader->readFile(entry.filePath, &errorString);
+    if (data.isEmpty()) {
+        return false;
+    }
+
+    QImage image;
+    if (image.loadFromData(data)) {
+        QScreen *screen = QApplication::primaryScreen();
+        QSize targetSize = screen ? screen->geometry().size() : size();
+        // 双图模式下每张图片只占用一半宽度
+        targetSize.setWidth(targetSize.width() / 2 - 10);
+        if (image.width() > targetSize.width() || image.height() > targetSize.height()) {
+            QSize scaledSize = image.size().scaled(targetSize, Qt::KeepAspectRatio);
+            image = image.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        nextPixmap = QPixmap::fromImage(image);
+        return true;
+    }
+
+    return false;
+}
+
+void ZipImageViewer::updateDualImages()
+{
+    if (currentPixmap.isNull() || nextPixmap.isNull()) return;
+
+    QPixmap leftPixmap, rightPixmap;
+
+    switch (dualMode) {
+        case DualDisplayMode::DualNextLeft:
+            // 当前在左，下一张在右（阅读顺序：先看左边的当前图，再看右边的下一张）
+            leftPixmap = currentPixmap;
+            rightPixmap = nextPixmap;
+            break;
+        case DualDisplayMode::DualNextRight:
+            // 下一张在左，当前在右（阅读顺序：先看右边的当前图，再看左边的下一张）
+            leftPixmap = nextPixmap;
+            rightPixmap = currentPixmap;
+            break;
+        default:
+            return;
+    }
+
+    // 获取可用尺寸（屏幕的一半）
+    QScreen *screen = QApplication::primaryScreen();
+    QSize targetSize = screen ? screen->geometry().size() : size();
+    // 精确计算每张图片的最大尺寸（屏幕宽度的一半）
+    targetSize.setWidth(targetSize.width() / 2);
+
+    // 缩放图片以适应半屏
+    QPixmap scaledLeft = leftPixmap;
+    QPixmap scaledRight = rightPixmap;
+
+    if (leftPixmap.width() > targetSize.width() || leftPixmap.height() > targetSize.height()) {
+        QSize scaledSize = leftPixmap.size().scaled(targetSize, Qt::KeepAspectRatio);
+        scaledLeft = leftPixmap.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    if (rightPixmap.width() > targetSize.width() || rightPixmap.height() > targetSize.height()) {
+        QSize scaledSize = rightPixmap.size().scaled(targetSize, Qt::KeepAspectRatio);
+        scaledRight = rightPixmap.scaled(scaledSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    dualLabelLeft->setPixmap(scaledLeft);
+    dualLabelRight->setPixmap(scaledRight);
+
+    // 更新信息标签 - 显示两张图片的信息
+    int nextIdx = findNextImageIndex(currentIndex);
+    ZipReader::ZipEntry entry = mediaEntries[currentIndex];
+    ZipReader::ZipEntry nextEntry = mediaEntries[nextIdx];
+    infoLabel->setText(QString("%1/%2 - %3 | %4/%5 - %6")
+                       .arg(currentIndex + 1)
+                       .arg(mediaEntries.size())
+                       .arg(entry.fileName)
+                       .arg(nextIdx + 1)
+                       .arg(mediaEntries.size())
+                       .arg(nextEntry.fileName));
+    infoLabel->adjustSize();
+    infoLabel->move(20, 20);
+    infoLabel->show();
 }

@@ -18,10 +18,18 @@
 #include <QBuffer>
 #include "zipreader.h"
 
+// 双图显示模式
+enum class DualDisplayMode {
+    Single,       // 单图显示
+    DualNextLeft, // 双图显示，下一张在左
+    DualNextRight // 双图显示，下一张在右
+};
+
 /**
  * ZIP 压缩包内媒体文件的查看器
  * 支持图片和视频浏览，支持左右键切换
  * A/D 键切换相邻 ZIP 文件
+ * E 键切换双图显示模式
  */
 class ZipImageViewer : public QDialog
 {
@@ -68,9 +76,23 @@ private:
     QLabel* getAvailableLabel();
     void switchToLabel(QLabel *label);
 
+    // 双图显示
+    void toggleDualDisplayMode();
+    bool loadDualImages();
+    void updateDualImages();
+    int findNextImageIndex(int fromIndex) const;
+    bool canDisplayDual() const;
+
     QStackedWidget *imageStack;
     QList<QLabel*> imageLabels;
     int currentLabelIndex;
+
+    // 双图显示标签
+    QWidget *dualWidget;
+    QLabel *dualLabelLeft;
+    QLabel *dualLabelRight;
+    QPixmap nextPixmap;
+    DualDisplayMode dualMode;
 
     QVideoWidget *videoWidget;
     QMediaPlayer *mediaPlayer;
