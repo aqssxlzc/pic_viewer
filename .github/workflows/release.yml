@@ -59,18 +59,25 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install libzip
+      - name: Install dependencies
         shell: pwsh
         run: |
           vcpkg install libzip:x64-windows
           echo "CMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+          # Install ImageMagick for icon conversion
+          choco install imagemagick -y
+
+      - name: Convert icon to ICO
+        shell: pwsh
+        run: |
+          magick convert icon.png -define icon:auto-resize=256,128,64,48,32,16 icon.ico
 
       - name: Build
         shell: pwsh
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}" -DVulkan_FOUND=OFF -DCMAKE_INSTALL_PREFIX=install
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}" -DVulkan_FOUND=OFF
           cmake --build . --config Release
 
       - name: Deploy Qt

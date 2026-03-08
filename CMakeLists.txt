@@ -53,6 +53,13 @@ add_executable(MediaViewer
     resources.qrc
 )
 
+# Windows icon embedding
+if(WIN32)
+    # Use resource file for Windows icon
+    target_sources(MediaViewer PRIVATE resources.rc)
+    set_target_properties(MediaViewer PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
 target_include_directories(MediaViewer PRIVATE
     ${LIBZIP_INCLUDE_DIRS}
 )
