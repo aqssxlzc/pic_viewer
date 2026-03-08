@@ -48,6 +48,7 @@ add_executable(MediaViewer
     zipmediaitem.h
     zipimageviewer.cpp
     zipimageviewer.h
+    resources.qrc
 )
 
 target_include_directories(MediaViewer PRIVATE

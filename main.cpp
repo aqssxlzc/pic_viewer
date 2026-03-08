@@ -3,6 +3,7 @@
 #include <QSurfaceFormat>
 #include <QThreadPool>
 #include <QThread>
+#include <QIcon>
 
 int main(int argc, char *argv[])
 {
@@ -19,13 +20,14 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("Media Viewer");
     app.setApplicationVersion("1.0");
-    
+    app.setWindowIcon(QIcon(":/icon.png"));
+
     // 设置线程池大小为 CPU 核心数的 2 倍，加速图片预加载
     int threadCount = QThread::idealThreadCount() * 2;
     QThreadPool::globalInstance()->setMaxThreadCount(qMax(8, threadCount));
-    
+
     MainWindow window;
     window.show();
-    
+
     return app.exec();
 }
