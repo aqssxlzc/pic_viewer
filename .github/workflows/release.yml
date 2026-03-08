@@ -70,7 +70,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}" -DVulkan_FOUND=OFF
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}" -DVulkan_FOUND=OFF -DCMAKE_INSTALL_PREFIX=install
           cmake --build . --config Release
 
       - name: Deploy Qt
@@ -79,6 +79,9 @@ jobs:
           cd build
           mkdir MediaViewer-windows
           cp Release/MediaViewer.exe MediaViewer-windows/
+          # Copy libzip and other vcpkg DLLs
+          cp C:/vcpkg/installed/x64-windows/bin/*.dll MediaViewer-windows/  -ErrorAction SilentlyContinue
+          cp C:/vcpkg/installed/x64-windows/debug/bin/*.dll MediaViewer-windows/ -ErrorAction SilentlyContinue
           cd MediaViewer-windows
           windeployqt MediaViewer.exe --release --no-translations
 
