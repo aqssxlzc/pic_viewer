@@ -94,8 +94,51 @@ jobs:
           name: MediaViewer-windows
           path: build/MediaViewer-windows-x64.zip
 
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.6.3'
+          host: 'mac'
+          target: 'desktop'
+          arch: 'clang_64'
+          modules: 'qtmultimedia'
+
+      - name: Install dependencies
+        run: |
+          brew install libzip
+
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_PREFIX_PATH="${{ env.Qt6_DIR }}"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Deploy Qt
+        run: |
+          cd build
+          mkdir -p MediaViewer-mac/MediaViewer.app/Contents/MacOS
+          cp MediaViewer MediaViewer-mac/MediaViewer.app/Contents/MacOS/
+          macdeployqt MediaViewer-mac/MediaViewer.app
+
+      - name: Package
+        run: |
+          cd build
+          zip -r MediaViewer-mac-x64.zip MediaViewer-mac
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaViewer-mac
+          path: build/MediaViewer-mac-x64.zip
+
   release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-mac]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -109,6 +152,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: MediaViewer-windows
+          path: artifacts
+
+      - name: Download Mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MediaViewer-mac
           path: artifacts
 
       - name: Create Release
