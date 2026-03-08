@@ -31,9 +31,13 @@ elseif(WIN32)
     set(LIBZIP_INCLUDE_DIRS "")
     set(LIBZIP_LIBRARIES libzip::zip)
 else()
-    # Linux: use pkg-config
+    # Linux/macOS: use pkg-config
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBZIP REQUIRED libzip)
+    # On macOS, also set library directory for linker
+    if(APPLE)
+        link_directories(${LIBZIP_LIBRARY_DIRS})
+    endif()
 endif()
 
 add_executable(MediaViewer
