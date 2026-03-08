@@ -12,10 +12,8 @@ set(CMAKE_AUTOUIC ON)
 # Note: -march=native removed for CI compatibility
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
 
-# Disable Vulkan requirement on Windows if not available
-if(WIN32)
-    set(Qt6Widgets_VULKAN_HEADER "" CACHE STRING "" FORCE)
-endif()
+# Disable Vulkan requirement (not needed for this project)
+set(Vulkan_FOUND OFF CACHE BOOL "" FORCE)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets Concurrent)
 
@@ -27,11 +25,15 @@ if(EXISTS "${LIBZIP_INCLUDE_DIR}/zip.h" AND EXISTS "${LIBZIP_LIBRARY}")
     message(STATUS "Using local libzip: ${LIBZIP_INCLUDE_DIR}")
     set(LIBZIP_INCLUDE_DIRS ${LIBZIP_INCLUDE_DIR})
     set(LIBZIP_LIBRARIES ${LIBZIP_LIBRARY})
-else()
-    # Try vcpkg or system
+elseif(WIN32)
+    # Windows: use vcpkg cmake config
     find_package(libzip CONFIG REQUIRED)
     set(LIBZIP_INCLUDE_DIRS "")
     set(LIBZIP_LIBRARIES libzip::zip)
+else()
+    # Linux: use pkg-config
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBZIP REQUIRED libzip)
 endif()
 
 add_executable(MediaViewer
