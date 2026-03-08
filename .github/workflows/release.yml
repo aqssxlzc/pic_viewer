@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qt6-base-dev qt6-multimedia-dev qt6-opengl-dev libgl1-mesa-dev libzip-dev cmake g++ make
+          sudo apt-get install -y qt6-base-dev qt6-multimedia-dev libgl1-mesa-dev libzip-dev cmake g++ make extra-cmake-modules
 
       - name: Build
         run: |
@@ -55,6 +55,11 @@ jobs:
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.1.1
+        with:
+          version: 1.3.268.0
 
       - name: Install libzip
         shell: pwsh
