@@ -93,5 +93,6 @@ target_link_libraries(MediaViewer PRIVATE
 
 # Install target
 install(TARGETS MediaViewer
+    BUNDLE  DESTINATION .
     RUNTIME DESTINATION bin
 )
