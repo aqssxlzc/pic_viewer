@@ -157,9 +157,10 @@ jobs:
       - name: Deploy Qt
         run: |
           cd build
-          mkdir -p MediaViewer-mac/MediaViewer.app/Contents/MacOS
-          cp MediaViewer MediaViewer-mac/MediaViewer.app/Contents/MacOS/
-          macdeployqt MediaViewer-mac/MediaViewer.app
+          # CMake generates MediaViewer.app directly (MACOSX_BUNDLE)
+          macdeployqt MediaViewer.app -verbose=1
+          mkdir -p MediaViewer-mac
+          cp -r MediaViewer.app MediaViewer-mac/
 
       - name: Package
         run: |

@@ -40,7 +40,7 @@ else()
     endif()
 endif()
 
-add_executable(MediaViewer
+add_executable(MediaViewer MACOSX_BUNDLE
     main.cpp
     mainwindow.cpp
     mainwindow.h
@@ -62,6 +62,17 @@ if(WIN32)
     # Use resource file for Windows icon
     target_sources(MediaViewer PRIVATE resources.rc)
     set_target_properties(MediaViewer PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+# macOS bundle metadata — required for a valid .app that macOS will launch
+if(APPLE)
+    set_target_properties(MediaViewer PROPERTIES
+        MACOSX_BUNDLE_GUI_IDENTIFIER  "com.mediaviewer.app"
+        MACOSX_BUNDLE_BUNDLE_NAME     "MediaViewer"
+        MACOSX_BUNDLE_BUNDLE_VERSION  ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}"
+        MACOSX_BUNDLE_COPYRIGHT       "Copyright 2024"
+    )
 endif()
 
 target_include_directories(MediaViewer PRIVATE
